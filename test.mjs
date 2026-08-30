@@ -452,6 +452,38 @@ ok('F1 works while typing code',
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 
+/* ---- a different easing per property ----
+
+   The spec had one `ease` for everything, which was less than the layer
+   underneath could say. A layer that takes something away is not a
+   simplification. A third element on the pair overrides it. */
+await type(`text('A').size(90).center(300)
+  .enter(400, { opacity: [0, 1, 'linear'], y: [100, 0, 'overshoot'] });`);
+const eased = await page.evaluate(() => {
+  const w = document.querySelector('#stage iframe').contentWindow;
+  w.__render(200, 12);
+  const e = document.querySelector('#stage iframe').contentDocument.querySelector('#stage > *');
+  return { o: Number(getComputedStyle(e).opacity).toFixed(2),
+           y: Math.round(new DOMMatrix(getComputedStyle(e).transform).f) };
+});
+ok('each property can have its own easing', eased.o === '0.50' && eased.y < 0,
+   `at half way: opacity ${eased.o} (linear), y ${eased.y} (already overshot past 0)`);
+
+/* ---- a control that does nothing says so ---- */
+await type(`group(text('A'), text('B')).layout('row', { gap: 40 }).size(80).center(300)
+  .stagger(120).alternate()
+  .enter(340, 'pop');`);
+ok('alternate with nothing to reverse says so',
+   /nothing to reverse/.test(await page.textContent('#codeNote')),
+   await page.textContent('#codeNote'));
+
+await type(`group(text('A'), text('B')).layout('row', { gap: 40 }).size(80).center(300)
+  .stagger(120).alternate()
+  .enter(340, { opacity: [0, 1], y: [70, 0] });`);
+ok('and the note clears once it has something',
+   (await page.textContent('#codeNote')) === '',
+   JSON.stringify(await page.textContent('#codeNote')));
+
 /* ---- the pickers ----
 
    The font picker used to only understand line() and block(), so anywhere in a

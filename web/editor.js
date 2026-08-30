@@ -197,6 +197,17 @@ export function showError(msg, where) {
 }
 export const openClip = () => clip;
 
+/* A note is not an error. The clip runs; this is the tool saying that what you
+   wrote will not do what you appear to have meant, which is the case an error
+   message never covers and silence covers worst of all. Amber, below the code,
+   and it never displaces a real error. */
+export function showNote(msg) {
+  const strip = $('#codeNote');
+  if (!strip) return;
+  strip.textContent = msg || '';
+  strip.classList.toggle('hidden', !msg);
+}
+
 /* Put text in as whole lines, indented to match where the cursor is. Used by
    the reference: clicking an example lands it in the code rather than making
    you retype it.
@@ -229,6 +240,7 @@ export function forget(id) {
   clip = null;
   loading = false;
   showError('');
+  showNote('');
   setValue('');
   $('#codeName').textContent = 'no clip selected — click one on the timeline';
   $('#presets').disabled = true;

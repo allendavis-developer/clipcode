@@ -20,6 +20,10 @@ export const setErrorSink = fn => { onError = fn; };
 let onDuration = () => {};
 export const setDurationSink = fn => { onDuration = fn; };
 
+/* Not an error: something the clip runs but that will not do what you meant. */
+let onNote = () => {};
+export const setNoteSink = fn => { onNote = fn; };
+
 /* A clip that throws shows nothing, and nothing is the least informative
    thing a screen can do. Say so on the picture itself — the code pane's
    strip is easy to miss when you are looking at the viewer. */
@@ -93,6 +97,7 @@ addEventListener('message', ev => {
       L.natural = d.duration;
       onDuration(id, d.duration);
     }
+    if (d.studio === 'note') onNote(id, d.message);
     if (d.studio === 'error')
       fail(id, `line ${d.line}: ${d.message}`, { line: d.line, col: d.col || 0 });
     if (d.studio === 'timeout') fail(id, 'the clip did not finish loading');

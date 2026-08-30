@@ -171,8 +171,14 @@ create inside an `if` changes what everything after it refers to.
 | `.font() .size() .color() .at() .style() .layout()` | how it looks |
 | `.enter() .exit() .hold() .move() .fade() .scale() .rotate() .draw()` | what it does |
 | `.start() .after() .with() .before() .alignEnd() .during()` | when it does it |
-| `.stagger()` | children cascade instead of arriving together |
+| `.stagger(ms)` | children cascade — each starts `ms` after the one before |
+| `.alternate()` | every second child reversed. Negates x, y and rotation only, and says so in the pane when a move has none of those |
 | `.animate(prop, keyframes)` | the escape hatch |
+
+A spec entry is `property: [from, to]`, using the spec's `ease`, or
+`property: [from, to, ease]` to give that one property an easing of its own —
+so a fade can be flat while the movement it accompanies overshoots. Anything
+that is not a pair is passed through as a raw track.
 
 Entrance presets: `fade pop rise drop slide grow spin`. Three levels of detail,
 and you should rarely need the third:

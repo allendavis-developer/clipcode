@@ -165,6 +165,13 @@ function applyDuration(id, ms) {
 
 Stage.setDurationSink(applyDuration);
 
+/* A note is not an error — the clip runs. It is the tool saying that what you
+   wrote will not do what you appear to have meant. */
+Stage.setNoteSink((id, msg) => {
+  const open = Editor.openClip();
+  if (open && open.id === id) Editor.showNote(msg);
+});
+
 /* An error inside a clip belongs in the pane where you can fix it — but only
    for the clip you are actually looking at. */
 Stage.setErrorSink((id, msg, where) => {

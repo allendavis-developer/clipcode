@@ -146,6 +146,11 @@
   /* which spec keys are motion rather than settings */
   var NOT_A_PROPERTY = { ease: 1, from: 1 };
 
+  /* the properties that have a direction, and so can be reversed. scale and
+     opacity have a size but not a side, which is why .alternate() cannot do
+     anything with them. */
+  var DIRECTIONAL = { x: 1, y: 1, rotation: 1, rotateX: 1, rotateY: 1 };
+
   /* -------------------------------------------------------------- a node -- */
   function Node(kind, opts) {
     this.alt = false;                 /* every second child reversed */
@@ -337,10 +342,13 @@
    *
    *    presets  fade  pop  rise  drop  slide  grow  spin
    *
-   *  A spec is a list of property: [from, to] pairs, plus an optional ease.
+   *  A spec is a list of property: [from, to] pairs, plus an optional ease
+   *  for all of them. A third element on any pair gives that one property an
+   *  easing of its own, so the fade can be flat while the movement overshoots.
    *  ex  title.enter(300);
    *  ex  title.enter(300, 'pop');
    *  ex  title.enter(340, { opacity: [0, 1], scale: [.72, 1], rotation: [-5, 0], ease: 'easeOut' });
+   *  ex  title.enter(340, { opacity: [0, 1, 'linear'], y: [70, 0, 'overshoot'] });
    */
   P.enter = function (ms, how) {
     return this._add(ms === undefined ? 340 : ms, specOf(ENTER, how, 'pop'));
@@ -494,13 +502,28 @@
 
   /* --------------------------------------------------------------- apply -- */
   /* A spec of [from, to] pairs becomes motion.js tracks over one window. */
+  /* A spec entry is one of three things:
+
+       [from, to]         moves over the whole window, using the spec's ease
+       [from, to, ease]   the same, with an easing of its own
+       a track            passed straight through, for anything else
+
+     The third element is what lets one property overshoot while another fades
+     flat. Without it the spec would have one easing for everything, which is
+     less than the layer underneath can say, and a layer that takes something
+     away is not a simplification. */
+  function pair(v) {
+    return v && (v.length === 2 || v.length === 3)
+      && typeof v[0] === 'number' && typeof v[1] === 'number';
+  }
+
   function tracks(spec, at, dur) {
     var out = {}, k, v;
     for (k in spec) {
       if (NOT_A_PROPERTY[k] || k === '__draw') continue;
       v = spec[k];
-      out[k] = (v && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number')
-        ? M.change(at, at + dur, v[0], v[1], spec.ease)
+      out[k] = pair(v)
+        ? M.change(at, at + dur, v[0], v[1], v[2] === undefined ? spec.ease : v[2])
         : v;                                   /* already a track, pass through */
     }
     return out;
@@ -518,9 +541,7 @@
     return M.box(n.id, n.css, parentId);       /* group and items */
   }
 
-  /* Reverse the sense of a directional move. Only x, y and rotation have a
-     direction to reverse; scale and opacity do not. */
-  var DIRECTIONAL = { x: 1, y: 1, rotation: 1, rotateX: 1, rotateY: 1 };
+  /* Reverse the sense of a directional move. */
   function flip(spec) {
     var out = {}, k;
     for (k in spec) {
@@ -603,9 +624,44 @@
     });
   };
 
+  /* A control that does nothing and says nothing is worse than one that is not
+     there. .alternate() reverses x, y and rotation, so on a move that only
+     changes opacity or scale it is a no-op — and looks like a bug in the tool
+     rather than a gap in the spec. Say so. */
+  /* undefined, not null, so the FIRST frame always reports — including
+     reporting that there is nothing to say, which is how a note clears
+     after you fix what it was about. */
+  var lastNote;
+  function noteFor() {
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (!n.alt || !n.children.length) continue;
+      var directional = false;
+      for (var j = 0; j < n.moves.length; j++)
+        for (var k in (n.moves[j].spec || {}))
+          if (DIRECTIONAL[k]) directional = true;
+      if (!directional)
+        return '.alternate() has nothing to reverse here — it flips x, y and '
+             + 'rotation, and this move only changes '
+             + Object.keys(n.moves.reduce(function (a, m) {
+                 for (var k in (m.spec || {})) if (!NOT_A_PROPERTY[k]) a[k] = 1;
+                 return a;
+               }, {})).join(' and ') + '.';
+    }
+    return null;
+  }
+
   W.__sceneEnd = function (t) {
     if (!nodes.length) return;
     resolve();
+
+    var note = noteFor();
+    if (note !== lastNote) {
+      lastNote = note;
+      try {
+        parent.postMessage({ studio: 'note', src: location.pathname, message: note }, '*');
+      } catch (e) { /* not in a frame */ }
+    }
     var end = 0;
     for (var i = 0; i < nodes.length; i++) {
       if (nodes[i].parent) continue;            /* children are drawn by their group */
