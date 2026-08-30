@@ -338,7 +338,7 @@ stat.layout('row', { gap: 130 }).size(140).color('#e12392').at(90, 340)
 const kids = await page.evaluate(() => {
   const d = document.querySelector('#stage iframe').contentDocument;
   document.querySelector('#stage iframe').contentWindow.__render(600, 36);
-  return [...d.querySelectorAll('#stage > * > *')]
+  return [...d.querySelectorAll('#__world > * > *')]
     .map(e => ({ t: e.textContent, x: Math.round(e.getBoundingClientRect().left),
                  w: Math.round(e.getBoundingClientRect().width) }));
 });
@@ -356,7 +356,7 @@ await type(`group(text('3361'), text('people'))
 const cascade = await page.evaluate(() => {
   const f = document.querySelector('#stage iframe');
   f.contentWindow.__render(130, 8);
-  return [...f.contentDocument.querySelectorAll('#stage > * > *')].map(e => ({
+  return [...f.contentDocument.querySelectorAll('#__world > * > *')].map(e => ({
     t: e.textContent, o: Number(getComputedStyle(e).opacity).toFixed(2) }));
 });
 /* At 130ms the first word is most of the way in and the second has not begun,
@@ -369,7 +369,7 @@ ok('a stagger reaches the children',
 const alt = await page.evaluate(() => {
   const f = document.querySelector('#stage iframe');
   f.contentWindow.__render(0, 0);
-  return [...f.contentDocument.querySelectorAll('#stage > * > *')]
+  return [...f.contentDocument.querySelectorAll('#__world > * > *')]
     .map(e => Math.round(new DOMMatrix(getComputedStyle(e).transform).f));
 });
 ok('alternate reverses every second one', alt[0] === 70 && alt[1] === -70,
@@ -462,7 +462,7 @@ await type(`text('A').size(90).center(300)
 const eased = await page.evaluate(() => {
   const w = document.querySelector('#stage iframe').contentWindow;
   w.__render(200, 12);
-  const e = document.querySelector('#stage iframe').contentDocument.querySelector('#stage > *');
+  const e = document.querySelector('#stage iframe').contentDocument.querySelector('#__world > *');
   return { o: Number(getComputedStyle(e).opacity).toFixed(2),
            y: Math.round(new DOMMatrix(getComputedStyle(e).transform).f) };
 });

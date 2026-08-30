@@ -121,6 +121,8 @@
      is what keeps the render a pure function of t. */
   var nodes = [];
   var counter = 0;
+  var camera = null;                /* the one camera, rebuilt each frame */
+  var W_ = W.__stageW, H_ = W.__stageH;
   var idFor = function (kind) { return 's' + (counter++) + kind.charAt(0); };
 
   /* ------------------------------------------------------------- presets -- */
@@ -154,6 +156,7 @@
   /* -------------------------------------------------------------- a node -- */
   function Node(kind, opts) {
     this.alt = false;                 /* every second child reversed */
+    this.z = 0;                       /* depth, in pixels from the stage plane */
     this.kind = kind;                 /* text | image | shape | group | items */
     this.id = idFor(kind);
     this.opts = opts || {};
@@ -217,6 +220,7 @@
     this.css.right = 0;
     this.css.textAlign = 'center';
     this.css.justifyContent = 'center';
+    this.css.justifyContent = 'center';
     if (y !== undefined) this.css.top = y;
     return this;
   };
@@ -229,8 +233,32 @@
   P.at = function (x, y) {
     if (x !== undefined) this.css.left = x;
     if (y !== undefined) this.css.top = y;
+    /* Placed by its left edge, so it is as wide as its content. Text defaults
+       to a full-width centred line underneath, and leaving that `right: 0` in
+       place would make a four-letter word measure most of the stage — which
+       reads fine until the camera tries to frame it. */
+    if (x !== undefined && this.css.right === undefined) {
+      this.css.right = 'auto';
+      if (this.css.textAlign === undefined) this.css.textAlign = 'left';
+    }
     return this;
   };
+
+  /** .depth(z)   @look
+   *  How far from the lens it sits, in pixels. 0 is the plane of the stage,
+   *  negative is further away, positive is closer to you.
+   *
+   *  This is what makes a camera move read as space rather than as zoom.
+   *  Something at -800 draws smaller and shifts LESS than something at 0 when
+   *  the camera moves, and when the camera pushes in, the near thing leaves
+   *  frame long before the far one does. None of that is animated — it falls
+   *  out of the stage's perspective, so you get it by saying where things are
+   *  rather than by keyframing what they do.
+   *  ex  headline.depth(0);
+   *  ex  chart.depth(-200);
+   *  ex  backdrop.depth(-900);
+   */
+  P.depth = function (z) { this.z = z || 0; return this; };
 
   /** .style({ ... })   @look
    *  Any CSS, for the things the named methods do not cover. Numbers are
@@ -534,7 +562,7 @@
   }
 
   function elementOf(n) {
-    var parentId = n.parent ? n.parent.id : undefined;
+    var parentId = n.parent ? n.parent.id : (worldEl() ? WORLD : undefined);
     /* A child of a laid-out group flows; a child of a plain group is still
        placed by hand with .at(). Everything on the stage itself is absolute. */
     if (n.parent && n.parent.css.display === 'flex' && n.css.position === undefined)
@@ -591,8 +619,13 @@
     var perChild = n.children.length && (n.gapMs || n.alt);
     var i, kid, kidSpec;
 
+    /* Depth is a standing fact about where the thing is, not a move, so it
+       goes into the spec as a constant rather than being animated. */
+    if (n.z) spec.z = spec.z || M.hold(n.z);
+
     if (!perChild && Object.keys(spec).length)
       M.anim(el, local, reverse ? flip(spec) : spec);
+    else if (!perChild && n.z) M.anim(el, local, { z: M.hold(n.z) });
 
     for (i = 0; i < n.children.length; i++) {
       kid = n.children[i];
@@ -610,7 +643,13 @@
   /* Called by the shell around the clip's own code. Everything the clip
      declared is thrown away and rebuilt, which is what makes the render a pure
      function of t no matter what the clip did. */
-  W.__sceneBegin = function () { nodes = []; counter = 0; };
+  W.__sceneBegin = function () {
+    nodes = [];
+    counter = 0;
+    camera = new Camera();
+    W.camera = camera;
+    W_ = W.__stageW || W_; H_ = W.__stageH || H_;
+  };
 
   /* The resolved timeline, after the relationships have been worked out. The
      relationships are what you wrote; this is what they came to. Exposed
@@ -618,14 +657,17 @@
      timestamps, and because it is the honest thing to assert against. */
   W.__scenePlan = function () {
     resolve();
-    return nodes.map(function (n) {
+    var out = camera && camera.moves.length
+      ? [{ id: 'camera', kind: 'camera', text: camera.moves.length + ' moves',
+           start: 0, end: Math.round(camera.length()), rel: 'absolute' }] : [];
+    return out.concat(nodes.map(function (n) {
       return { id: n.id, kind: n.kind,
                text: (n.opts.text || '').slice(0, 24),
                start: Math.round(n.startsAt()),
                end: Math.round(n.endsAt()),
                rel: n._rel ? n._rel.how + '(' + n._rel.of.id
                              + (n._rel.gap ? ', ' + n._rel.gap : '') + ')' : 'absolute' };
-    });
+    }));
   };
 
   /* A control that does nothing and says nothing is worse than one that is not
@@ -656,6 +698,7 @@
   }
 
   W.__sceneEnd = function (t) {
+    if (camera) applyCamera(camera, t);
     if (!nodes.length) return;
     resolve();
 
@@ -672,6 +715,7 @@
       applyNode(nodes[i], t, 0);
     }
     for (i = 0; i < nodes.length; i++) end = Math.max(end, nodes[i].endsAt());
+    if (camera) end = Math.max(end, camera.length());
     /* A clip with no duration() of its own is as long as its choreography.
        Say so when it changes, so the timeline follows theedit rather than
        holding a number nobody wrote. */
@@ -685,6 +729,238 @@
       }
     }
   };
+
+  /* ------------------------------------------------------------- camera -- */
+  /* The camera is a thing, not a set of moves you fake on every element.
+
+     Without it, "push into the number while the background falls away" means
+     animating the number, the background, and everything else in frame, each
+     with its own numbers, and keeping them consistent by hand. With it, that
+     sentence is one statement, and the background falls away because it is
+     further away — not because you animated it to.
+
+     The model is a window into a space. The stage carries the perspective and
+     #world carries everything in it, so moving the camera is transforming
+     #world once:
+
+         scale(s) rotateX(rx) rotateY(ry) rotate(roll)
+         translate(-(fx - W/2), -(fy - H/2))
+
+     fx, fy is the point in the scene that sits at the centre of frame. At
+     fx,fy = the stage centre and s = 1 this is the identity, so a clip that
+     never mentions the camera is unaffected.
+
+     The scale comes before the translate on purpose: panning while zoomed in
+     covers more screen for the same distance in the scene, which is what a
+     real camera does.
+
+     Depth is what makes it read as space rather than as zoom. An element at
+     .depth(-800) is genuinely further from the lens: it draws smaller, and it
+     shifts less than a nearer one when the camera moves, because the browser
+     is doing the perspective divide. Nothing about parallax is animated. */
+
+  var WORLD = '__world';
+  var CAM0 = { fx: null, fy: null, s: 1, roll: 0, rx: 0, ry: 0 };
+
+  function worldEl() {
+    var st = D.getElementById('stage');
+    var w = D.getElementById(WORLD);
+    if (!w && st) {
+      w = D.createElement('div');
+      w.id = WORLD;
+      st.appendChild(w);
+    }
+    return w;
+  }
+
+  /* An element's centre in scene coordinates. Walks up the offset chain rather
+     than reading a bounding box, because a bounding box is in screen pixels
+     and already has the camera's own transform baked into it — focusing on
+     that would chase its own tail every frame. */
+  function centreOf(el) {
+    var x = 0, y = 0, n = el;
+    while (n && n.id !== WORLD) {
+      x += n.offsetLeft;
+      y += n.offsetTop;
+      n = n.offsetParent;
+    }
+    return { x: x + el.offsetWidth / 2, y: y + el.offsetHeight / 2,
+             w: el.offsetWidth, h: el.offsetHeight };
+  }
+
+  function Camera() {
+    this.moves = [];       /* {at, dur, to: partial, ref, fill, ease} */
+    this._cursor = 0;
+    this._ease = 'easeInOut';
+  }
+  var C = Camera.prototype;
+
+  C._add = function (dur, to, extra) {
+    var m = { at: this._cursor, dur: dur || 0, to: to || {}, ease: this._ease };
+    if (extra) for (var k in extra) m[k] = extra[k];
+    this.moves.push(m);
+    this._cursor += (dur || 0);
+    return this;
+  };
+
+  /** camera.ease(name)   @camera
+   *  The easing every camera move after this one uses, unless it names its
+   *  own. Defaults to easeInOut, which is what a camera on a tripod does.
+   *  ex  camera.ease('easeOut').to(chart, 500);
+   */
+  C.ease = function (e) { this._ease = e; return this; };
+
+  /** camera.to(thing, durationMs)   @camera
+   *  Move so that `thing` is in the middle of frame. Give it an element or a
+   *  { x, y } point in scene coordinates.
+   *  ex  camera.to(chart, 500);
+   *  ex  camera.to({ x: 1400, y: 300 }, 700);
+   */
+  C.to = function (thing, ms) {
+    return this._add(ms === undefined ? 500 : ms, {}, { ref: thing });
+  };
+
+  /** camera.focus(thing, durationMs, options)   @camera
+   *  Move to it AND frame it: the camera zooms so the thing fills the frame.
+   *
+   *    options  fill  how much of the width it should take, 0 to 1.
+   *                   Default 0.72, which leaves it room to breathe.
+   *  ex  camera.focus(stat, 400);
+   *  ex  camera.focus(chart, 600, { fill: 0.9 });
+   */
+  C.focus = function (thing, ms, o) {
+    return this._add(ms === undefined ? 500 : ms, {},
+                     { ref: thing, fill: (o && o.fill) || 0.72 });
+  };
+
+  /** camera.zoom(scale, durationMs)   @camera
+   *  An absolute zoom. 1 is the whole stage, 2 is twice as close.
+   *  ex  camera.zoom(1.8, 400);
+   */
+  C.zoom = function (k, ms) {
+    return this._add(ms === undefined ? 400 : ms, { s: k });
+  };
+
+  /** camera.push(by, durationMs)   @camera
+   *  Zoom RELATIVE to wherever it already is, so .push(1.4) is forty per cent
+   *  closer than now whatever that was. This is the one you want in a chain.
+   *  ex  camera.focus(stat, 400).hold(200).push(1.7, 350);
+   */
+  C.push = function (k, ms) {
+    return this._add(ms === undefined ? 400 : ms, { sBy: k });
+  };
+
+  /** camera.pull(by, durationMs)   @camera
+   *  The other way: .pull(2) ends up half as close.
+   *  ex  camera.pull(1.6, 500);
+   */
+  C.pull = function (k, ms) {
+    return this._add(ms === undefined ? 400 : ms, { sBy: 1 / (k || 1) });
+  };
+
+  /** camera.roll(degrees, durationMs)   @camera
+   *  Tilt the horizon. A degree or two is a lot.
+   *  ex  camera.roll(-3, 250);
+   */
+  C.roll = function (deg, ms) {
+    return this._add(ms === undefined ? 300 : ms, { roll: deg });
+  };
+
+  /** camera.turn(degrees, durationMs)   @camera
+   *  Swing around the vertical axis, so one side of the scene comes towards
+   *  you and the other goes away. Needs depth in the scene to read.
+   *  ex  camera.turn(-14, 600);
+   */
+  C.turn = function (deg, ms) {
+    return this._add(ms === undefined ? 500 : ms, { ry: deg });
+  };
+
+  /** camera.tilt(degrees, durationMs)   @camera
+   *  The same about the horizontal axis: looking down at the scene or up at it.
+   *  ex  camera.tilt(8, 500);
+   */
+  C.tilt = function (deg, ms) {
+    return this._add(ms === undefined ? 500 : ms, { rx: deg });
+  };
+
+  /** camera.hold(durationMs)   @camera
+   *  Sit still. Between two moves, which is where the rhythm comes from.
+   *  ex  camera.focus(stat, 400).hold(300).to(chart, 500);
+   */
+  C.hold = function (ms) { return this._add(ms || 0, {}); };
+
+  /** camera.reset(durationMs)   @camera
+   *  Back to the whole stage, straight on.
+   *  ex  camera.reset(600);
+   */
+  C.reset = function (ms) {
+    return this._add(ms === undefined ? 500 : ms,
+                     { s: 1, roll: 0, rx: 0, ry: 0, home: true });
+  };
+
+  C.length = function () {
+    var end = 0;
+    for (var i = 0; i < this.moves.length; i++)
+      end = Math.max(end, this.moves[i].at + this.moves[i].dur);
+    return end;
+  };
+
+  /* Walk the moves in order, turning each into concrete numbers. A move is
+     relative to where the one before it finished, which is what lets a chain
+     read as directions rather than as absolute framings. */
+  function cameraTracks(cam) {
+    var W = W_ || 1920, H = H_ || 1080;
+    var st = { fx: W / 2, fy: H / 2, s: 1, roll: 0, rx: 0, ry: 0 };
+    var keys = { fx: [[0, st.fx]], fy: [[0, st.fy]], s: [[0, 1]],
+                 roll: [[0, 0]], rx: [[0, 0]], ry: [[0, 0]] };
+
+    for (var i = 0; i < cam.moves.length; i++) {
+      var m = cam.moves[i], to = m.to, next = {
+        fx: st.fx, fy: st.fy, s: st.s, roll: st.roll, rx: st.rx, ry: st.ry
+      };
+      if (m.ref) {
+        var pt = m.ref;
+        if (pt instanceof Node) {
+          var el = D.getElementById(pt.id);
+          pt = el ? centreOf(el) : { x: W / 2, y: H / 2, w: W, h: H };
+        }
+        next.fx = pt.x === undefined ? st.fx : pt.x;
+        next.fy = pt.y === undefined ? st.fy : pt.y;
+        if (m.fill && pt.w) next.s = Math.max(0.05, (W * m.fill) / pt.w);
+      }
+      if (to.home) { next.fx = W / 2; next.fy = H / 2; }
+      if (to.s !== undefined) next.s = to.s;
+      if (to.sBy !== undefined) next.s = st.s * to.sBy;
+      if (to.roll !== undefined) next.roll = to.roll;
+      if (to.rx !== undefined) next.rx = to.rx;
+      if (to.ry !== undefined) next.ry = to.ry;
+
+      var end = m.at + m.dur;
+      for (var k in keys) {
+        /* hold the old value until the move starts, so a chain of moves does
+           not smear one into the next across a hold */
+        if (m.at > 0) keys[k].push([m.at, st[k]]);
+        keys[k].push([end, next[k], m.ease]);
+      }
+      st = next;
+    }
+    return keys;
+  }
+
+  function applyCamera(cam, t) {
+    var el = worldEl();
+    if (!el || !cam.moves.length) return;
+    var W = W_ || 1920, H = H_ || 1080;
+    var k = cameraTracks(cam);
+    var fx = M.track(k.fx, t), fy = M.track(k.fy, t), s = M.track(k.s, t);
+    el.style.transform =
+      'scale(' + s.toFixed(4) + ') ' +
+      'rotateX(' + M.track(k.rx, t).toFixed(3) + 'deg) ' +
+      'rotateY(' + M.track(k.ry, t).toFixed(3) + 'deg) ' +
+      'rotate(' + M.track(k.roll, t).toFixed(3) + 'deg) ' +
+      'translate(' + (-(fx - W / 2)).toFixed(2) + 'px,' +
+                     (-(fy - H / 2)).toFixed(2) + 'px)';
+  }
 
   /* ------------------------------------------------------------- making -- */
 

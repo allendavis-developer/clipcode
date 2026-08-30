@@ -73,9 +73,19 @@ function shell(js, w, h, faces) {
 <style>
 ${faces || ''}
   html,body{margin:0;background:transparent;overflow:hidden}
+  /* The stage is a window into a space, not a sheet of paper. Perspective is
+     what makes rotateY a turn rather than a horizontal squash, and what makes
+     an element with depth move less than one in front of it when the camera
+     moves. Without it every 3D property is a flat approximation. */
   #stage{position:relative;width:${w}px;height:${h}px;overflow:hidden;
-         color:#fff;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+         color:#fff;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+         perspective:1800px;perspective-origin:50% 45%}
   #stage>*{position:absolute}
+  /* Everything the camera moves lives in here, and keeps its depth while it
+     does — without preserve-3d the browser flattens the children into the
+     parent's plane and the parallax disappears. */
+  #__world{position:absolute;inset:0;transform-style:preserve-3d;
+           transform-origin:50% 50%}
 </style>
 <div id="stage"></div>
 <script src="/web/motion.js"></script>
