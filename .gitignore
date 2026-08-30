@@ -6,3 +6,7 @@ node_modules/
 
 # rendered video is output, not source
 renders/
+
+# screenshots a check driver takes while it runs
+checks/shots/
+checks/_shots/

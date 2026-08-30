@@ -250,6 +250,7 @@ export function forget(id) {
   $('#codeName').textContent = 'no clip selected — click one on the timeline';
   $('#presets').disabled = true;
   $('#btnSaveMove').disabled = true;
+  $('#pickShape').disabled = true;
   $('#codePane').classList.add('locked');
   if (cm) cm.setOption('readOnly', true);
 }
@@ -266,6 +267,7 @@ export async function open(next) {
     : 'no clip selected — click one on the timeline';
   $('#presets').disabled = !editable;
   $('#btnSaveMove').disabled = !editable;
+  $('#pickShape').disabled = !editable;
   /* Locked until the source is actually in the pane. Unlocking first means you
      can type into a document that is about to be replaced by the fetch landing
      — the keystrokes go in and vanish, which looks exactly like a keyboard
