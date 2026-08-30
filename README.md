@@ -174,7 +174,26 @@ create inside an `if` changes what everything after it refers to.
 | `.start() .after() .with() .before() .alignEnd() .during()` | when it does it |
 | `.stagger(ms)` | children cascade — each starts `ms` after the one before |
 | `.alternate()` | every second child reversed. Negates x, y and rotation only, and says so in the pane when a move has none of those |
+| `.typeOn(ms)` | writes itself on a character at a time, caret and all |
 | `.animate(prop, keyframes)` | the escape hatch |
+
+And the camera, which is a thing rather than a set of moves faked on every
+element:
+
+| | |
+|---|---|
+| `camera.to(x) .focus(x, ms, {fill})` | put it in the middle of frame, and frame it |
+| `camera.zoom(k) .push(k) .pull(k)` | absolute, and relative |
+| `camera.roll() .turn() .tilt()` | around each axis |
+| `camera.drift({zoom, x, y}, ms)` | the slow move that never settles |
+| `camera.follow(group, ms)` | track sideways as a cascade builds |
+| `camera.hold() .reset() .ease()` | |
+| `thing.depth(z)` | how far from the lens, which is where parallax comes from |
+
+`captions([...])`, `stack([...])` and `items([...])` cover the three text
+registers this kind of edit is made of: a caption channel that changes card by
+card at the bottom of frame, an asymmetric word stack with per-line size and
+colour, and a plain list.
 
 A spec entry is `property: [from, to]`, using the spec's `ease`, or
 `property: [from, to, ease]` to give that one property an easing of its own —

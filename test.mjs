@@ -392,6 +392,64 @@ const sceneLit = await renderAt(400);
 ok('and the group is on the picture', sceneLit > sceneDark * 2,
    `${sceneDark} lit at 0ms -> ${sceneLit} at 400ms`);
 
+/* ---- the primitives the style is actually built from ---- */
+const textNow = async ms => {
+  await page.evaluate(t => {
+    document.querySelector('#stage iframe').contentWindow.__render(t, 0);
+  }, ms);
+  await page.waitForTimeout(120);
+  return page.evaluate(() => [...document.querySelector('#stage iframe')
+    .contentDocument.querySelectorAll('#__world > *')].map(e => e.textContent).join(' | '));
+};
+
+await type(`captions([['first card', 800], ['second card', 900], ['third card', 700]]);`);
+const c1 = await textNow(400), c2 = await textNow(1000), c3 = await textNow(2000);
+ok('captions replace card by card',
+   c1 === 'first card' && c2 === 'second card' && c3 === 'third card',
+   `${c1} / ${c2} / ${c3}`);
+ok('and the clip is as long as the words',
+   (await page.evaluate(() => {
+     const e = [...document.querySelectorAll('.clip')].pop();
+     return e ? e.querySelector('.cd').textContent : null;
+   })) === '2.40s', '800 + 900 + 700');
+
+await type(`text('hello there').size(60).at(120, 400).typeOn(1000, { caret: '', hold: 0 });`);
+const half = await textNow(500), all = await textNow(1000);
+ok('typeOn writes on a character at a time',
+   half.length > 2 && half.length < 'hello there'.length && all === 'hello there',
+   `"${half}" at half way, "${all}" at the end`);
+/* the test that matters for purity: going back must untype it */
+const backAgain = await textNow(500);
+ok('and scrubbing backwards untypes it exactly', backAgain === half,
+   `"${backAgain}" the second time at 500ms`);
+
+await type(`stack([['and', 70], ['tweak', 130, '#ffb02e'], ['the rest', 80]])
+  .at(220, 240).stagger(170).enter(240, 'rise');`);
+const rows = await page.evaluate(() => [...document.querySelector('#stage iframe')
+  .contentDocument.querySelectorAll('#__world > * > *')]
+  .map(e => `${getComputedStyle(e).fontSize}/${getComputedStyle(e).color}`));
+ok('a stack carries per-line size and colour',
+   rows[1] === '130px/rgb(255, 176, 46)' && rows[0] === '70px/rgb(255, 255, 255)',
+   rows.join('  '));
+
+await type(`duration(4000);
+text('DRIFT').size(200).center(400);
+camera.drift({ zoom: 1.20 }, 4000);`);
+const drifts = [];
+for (const ms of [0, 1000, 2000, 3000, 4000]) {
+  drifts.push(await page.evaluate(t => {
+    const f = document.querySelector('#stage iframe');
+    f.contentWindow.__render(t, 0);
+    return new DOMMatrix(getComputedStyle(f.contentDocument.getElementById('__world')).transform).a;
+  }, ms));
+}
+/* Linear on purpose: an eased drift decelerates into the cut and reads as the
+   shot running out rather than as the edit moving on. Equal steps is the test. */
+const steps = drifts.slice(1).map((v, i) => v - drifts[i]);
+ok('a camera drift is linear and never settles',
+   Math.max(...steps) - Math.min(...steps) < 0.002,
+   drifts.map(d => d.toFixed(3)).join(' -> '));
+
 /* ---- the reference ----
 
    Its content comes out of the doc comments in motion.js, so these checks are

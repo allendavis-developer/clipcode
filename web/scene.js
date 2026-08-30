@@ -135,7 +135,12 @@
     drop:  { opacity: [0, 1], y: [-70, 0], ease: 'overshoot' },
     slide: { opacity: [0, 1], x: [-90, 0], ease: 'easeOut' },
     grow:  { opacity: [0, 1], scale: [0.4, 1], ease: 'settle' },
-    spin:  { opacity: [0, 1], scale: [0.7, 1], rotation: [-12, 0], ease: 'overshoot' }
+    spin:  { opacity: [0, 1], scale: [0.7, 1], rotation: [-12, 0], ease: 'overshoot' },
+    /* arrives out of focus and resolves — an entrance, not a look: everything
+       is sharp once it has landed */
+    focus: { opacity: [0, 1], blur: [14, 0], scale: [1.06, 1], ease: 'easeOut' },
+    /* comes at you from behind the lens and stops in the plane of the stage */
+    fly:   { opacity: [0, 1], z: [-1400, 0], ease: 'easeOut' }
   };
   var EXIT = {
     fade:  { opacity: [1, 0], ease: 'easeIn' },
@@ -451,6 +456,38 @@
     return this._add(ms === undefined ? 600 : ms, { __draw: true, ease: ease });
   };
 
+  /** .typeOn(durationMs, options)   @motion
+   *  Write the text on one character at a time.
+   *
+   *    options  caret  a character to blink at the cursor, default the block
+   *                    '▉'. Pass '' for none.
+   *             blink  the blink period in ms, default 430
+   *             hold   keep the caret this long after the last character,
+   *                    default 400. 0 removes it the moment typing ends
+   *
+   *  Still a pure function of t — the number of characters is worked out from
+   *  the time, not counted up frame by frame, so scrubbing backwards untypes
+   *  it exactly.
+   *  ex  text('> how do I write a hook?').size(64).at(120, 400).typeOn(1400);
+   */
+  P.typeOn = function (ms, o) {
+    o = o || {};
+    var full = String(this.opts.text || '');
+    var dur = ms === undefined ? 1200 : ms;
+    var caret = o.caret === undefined ? '▉' : o.caret;
+    var blink = o.blink || 430;
+    var hold = o.hold === undefined ? 400 : o.hold;
+
+    this.opts.textAt = function (t) {
+      if (t < 0) return '';
+      var n = Math.floor(M.cl(t / (dur || 1)) * full.length);
+      var done = n >= full.length;
+      var showCaret = caret && (!done || t < dur + hold) && Math.floor(t / blink) % 2 === 0;
+      return full.slice(0, n) + (showCaret ? caret : '');
+    };
+    return this._add(dur + hold, {});
+  };
+
   /** .stagger(gapMs)   @group
    *  Delay each child of a group by this much more than the one before, so
    *  they cascade instead of arriving together.
@@ -561,13 +598,19 @@
     return out;
   }
 
-  function elementOf(n) {
+  function elementOf(n, local) {
     var parentId = n.parent ? n.parent.id : (worldEl() ? WORLD : undefined);
     /* A child of a laid-out group flows; a child of a plain group is still
        placed by hand with .at(). Everything on the stage itself is absolute. */
     if (n.parent && n.parent.css.display === 'flex' && n.css.position === undefined)
       n.css.position = 'static';
-    if (n.kind === 'text')  return M.label(n.id, n.opts.text, n.css, parentId);
+    if (n.kind === 'text') {
+      /* Some text is a function of time rather than a fixed string — a caption
+         channel changing card, a line typing itself on. It is still a pure
+         function of t: the same moment always gives the same characters. */
+      var str = n.opts.textAt ? n.opts.textAt(local === undefined ? 0 : local) : n.opts.text;
+      return M.label(n.id, str, n.css, parentId);
+    }
     if (n.kind === 'image') return M.img(n.id, n.opts.src, n.css, parentId);
     if (n.kind === 'shape') return M.box(n.id, n.css, parentId);
     return M.box(n.id, n.css, parentId);       /* group and items */
@@ -613,8 +656,8 @@
      That is the same distinction as line() against block() underneath, decided
      by whether you asked for a cascade rather than by picking a function. */
   function applyNode(n, t, extraDelay, reverse) {
-    var el = elementOf(n);
     var local = t - n._start - (extraDelay || 0);
+    var el = elementOf(n, local);
     var spec = specOfNode(n, el, local);
     var perChild = n.children.length && (n.gapMs || n.alt);
     var i, kid, kidSpec;
@@ -632,7 +675,7 @@
       var flipped = n.alt && (i % 2) ? !reverse : reverse;
       if (perChild && Object.keys(spec).length) {
         kidSpec = flipped ? flip(spec) : spec;
-        M.anim(elementOf(kid), local - i * n.gapMs, kidSpec);
+        M.anim(elementOf(kid, local - i * n.gapMs), local - i * n.gapMs, kidSpec);
       }
       applyNode(kid, t, (extraDelay || 0) + n._start + i * n.gapMs - kid._start, flipped);
     }
@@ -883,6 +926,49 @@
     return this._add(ms === undefined ? 500 : ms, { rx: deg });
   };
 
+  /** camera.drift(spec, durationMs)   @camera
+   *  The slow move that never settles. This is the default state of a shot in
+   *  this kind of edit: almost every frame is imperceptibly growing or sliding,
+   *  and the shot is still moving when it cuts.
+   *
+   *    spec  zoom  scale to grow BY over the span, e.g. 1.08 for eight per cent
+   *          x, y  pixels to slide by
+   *          turn  degrees of yaw
+   *
+   *  Linear, on purpose. An eased drift decelerates into the cut and reads as
+   *  the shot running out rather than as the edit moving on. Use .push() or
+   *  .to() when you want a move that arrives somewhere.
+   *  ex  camera.drift({ zoom: 1.08, x: 30 }, 5000);
+   */
+  C.drift = function (o, ms) {
+    o = o || {};
+    var m = { sBy: o.zoom === undefined ? 1.06 : o.zoom };
+    if (o.turn !== undefined) m.ry = o.turn;
+    var was = this._ease;
+    this._ease = 'linear';
+    this._add(ms === undefined ? 4000 : ms, m, { by: { x: o.x || 0, y: o.y || 0 } });
+    this._ease = was;
+    return this;
+  };
+
+  /** camera.follow(group, durationMs, options)   @camera
+   *  Track sideways as a group's children arrive, so the newest one stays in
+   *  frame and the older ones slide off behind it. The cascade builds to the
+   *  right; the camera goes with it.
+   *
+   *    options  fill  how much of the width the newest item should take
+   *
+   *  Give it the same span as the group's own stagger and the two stay locked:
+   *  one item lands, the camera moves one item, the next lands.
+   *  ex  const row = items(['Socrates', 'Newton', 'Curie']).stagger(400);
+   *  ex  row.at(200, 400).layout('row', { gap: 60 }).enter(300, 'rise');
+   *  ex  camera.follow(row, 1200);
+   */
+  C.follow = function (g, ms, o) {
+    return this._add(ms === undefined ? 1000 : ms, {},
+                     { trail: g, fill: (o && o.fill) || 0 });
+  };
+
   /** camera.hold(durationMs)   @camera
    *  Sit still. Between two moves, which is where the rhythm comes from.
    *  ex  camera.focus(stat, 400).hold(300).to(chart, 500);
@@ -928,6 +1014,22 @@
         next.fy = pt.y === undefined ? st.fy : pt.y;
         if (m.fill && pt.w) next.s = Math.max(0.05, (W * m.fill) / pt.w);
       }
+      /* a drift is relative to wherever the camera already is */
+      if (m.by) { next.fx = st.fx + (m.by.x || 0); next.fy = st.fy + (m.by.y || 0); }
+
+      /* follow: end framed on the LAST child, having passed through the others,
+         so the pan is one item per beat rather than one jump at the end */
+      if (m.trail && m.trail.children && m.trail.children.length) {
+        var kids = m.trail.children, last = kids[kids.length - 1];
+        var lel = D.getElementById(last.id);
+        if (lel) {
+          var c2 = centreOf(lel);
+          next.fx = c2.x;
+          next.fy = c2.y;
+          if (m.fill && c2.w) next.s = Math.max(0.05, (W * m.fill) / c2.w);
+        }
+      }
+
       if (to.home) { next.fx = W / 2; next.fy = H / 2; }
       if (to.s !== undefined) next.s = to.s;
       if (to.sBy !== undefined) next.s = st.s * to.sBy;
@@ -963,6 +1065,79 @@
   }
 
   /* ------------------------------------------------------------- making -- */
+
+  /** captions([[text, ms], ...])   @make
+   *  The subtitle channel: small text at the bottom of frame that changes card
+   *  by card and runs independently of everything else.
+   *
+   *  It is one element, not one per card. Cards replace each other instantly
+   *  with no animation, which is what reads as speech rather than as motion
+   *  graphics — a caption that fades is a caption you are looking at instead
+   *  of listening past.
+   *
+   *  Give a plain string instead of a pair to use the default 1200ms, and
+   *  chain .size() .color() .at() to move the whole channel.
+   *  ex  captions([
+   *  ex    ['most beginners write', 1100],
+   *  ex    ['the same sentence length', 1200],
+   *  ex    ['over and over again', 1000]
+   *  ex  ]);
+   */
+  function captions(list) {
+    var cards = (list || []).map(function (c) {
+      return typeof c === 'string' ? { text: c, ms: 1200 }
+                                   : { text: c[0], ms: c[1] === undefined ? 1200 : c[1] };
+    });
+    var total = cards.reduce(function (a, c) { return a + c.ms; }, 0);
+
+    var n = new Node('text', {});
+    n.opts.textAt = function (t) {
+      var acc = 0;
+      for (var i = 0; i < cards.length; i++) {
+        if (t < acc + cards[i].ms) return t < 0 ? '' : cards[i].text;
+        acc += cards[i].ms;
+      }
+      return '';
+    };
+    /* bottom-centre and small, the way a caption sits. All of it overridable. */
+    n.css.left = 0; n.css.right = 0; n.css.textAlign = 'center';
+    n.css.top = Math.round((H_ || 1080) * 0.80);
+    n.css.fontSize = Math.round((H_ || 1080) * 0.042);
+    n.css.fontWeight = 700;
+    n._add(total, {});                    /* so the clip is as long as the words */
+    return n;
+  }
+
+  /** stack([...])   @make
+   *  A column of words that builds one below the last — the emphasis block
+   *  this style is full of. Each line can carry its own size, colour and
+   *  weight, which is the point: a phrase reads as an asymmetric object rather
+   *  than as a paragraph.
+   *
+   *  A line is a string, or [text, size], or [text, size, colour], or
+   *  [text, size, colour, weight].
+   *  ex  stack([
+   *  ex    ['and', 70],
+   *  ex    ['tweak', 130, '#ffb02e'],
+   *  ex    ['the sentences', 80],
+   *  ex    ['to make them flow', 96, '#fff', 900]
+   *  ex  ])
+   *  ex    .at(220, 240)
+   *  ex    .stagger(170)
+   *  ex    .enter(240, 'rise');
+   */
+  function stack(list) {
+    var made = (list || []).map(function (row) {
+      var r = typeof row === 'string' ? [row] : row;
+      var node = text(r[0]);
+      if (r[1] !== undefined) node.css.fontSize = r[1];
+      if (r[2] !== undefined) node.css.color = r[2];
+      if (r[3] !== undefined) node.css.fontWeight = r[3];
+      return node;
+    });
+    var g = group.apply(null, made);
+    return g.layout('column', { gap: 6 });
+  }
 
   /** text(string)   @make
    *  Words on screen. Chain on to it to say how they look and what they do.
@@ -1033,7 +1208,8 @@
   }
 
   var API = { text: text, image: image, shape: shape,
-              group: group, items: items, sequence: sequence };
+              group: group, items: items, sequence: sequence,
+              captions: captions, stack: stack };
   W.SCENE = API;
   for (var k in API) W[k] = API[k];
 })(window, document);
