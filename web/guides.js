@@ -130,16 +130,37 @@ function place(el, m) {
 /* Clamped to the frame, because a guide outside the picture is not a guide. */
 const frac = (v, lo, size) => Math.max(0, Math.min(1, (v - lo) / size));
 
+/* How far outside the frame counts as thrown away. Generous, so a guide put
+   right on an edge does not vanish the moment you nudge it. */
+const OUT = 26;
+
+function offPicture(e, r) {
+  return e.clientX < r.left - OUT || e.clientX > r.right + OUT
+      || e.clientY < r.top - OUT || e.clientY > r.bottom + OUT;
+}
+
 function dragMark(el, i) {
   draggable(el, {
     start: () => ({ r: host.getBoundingClientRect() }),
     move: (e, c) => {
       const m = marks[i];
-      if (m.k !== 'h') m.x = frac(e.clientX, c.r.left, c.r.width);
-      if (m.k !== 'v') m.y = frac(e.clientY, c.r.top, c.r.height);
+      /* Deliberately NOT clamped to the frame. Clamping is what made a guide
+         impossible to get rid of: there was nowhere to drag it to. */
+      if (m.k !== 'h') m.x = (e.clientX - c.r.left) / c.r.width;
+      if (m.k !== 'v') m.y = (e.clientY - c.r.top) / c.r.height;
       place(el, m);
+      el.classList.toggle('gGoing', offPicture(e, c.r));
     },
-    end: () => save()
+    end: (e, c) => {
+      if (offPicture(e, c.r)) return removeMark(marks.indexOf(marks[i]));
+      /* it stayed, so put it back inside */
+      const m = marks[i];
+      if (m.k !== 'h') m.x = Math.max(0, Math.min(1, m.x));
+      if (m.k !== 'v') m.y = Math.max(0, Math.min(1, m.y));
+      place(el, m);
+      el.classList.remove('gGoing');
+      save();
+    }
   });
 }
 
@@ -170,7 +191,12 @@ function railDrag(rail, kind) {
       else c.m.y = frac(e.clientY, c.r.top, c.r.height);
       place(c.el, c.m);
     },
-    end: () => save()
+    end: (e, c) => {
+      /* pulled out and dropped straight back where it came from: not a guide,
+         just a slip */
+      if (offPicture(e, c.r)) return removeMark(marks.indexOf(c.m));
+      save();
+    }
   });
 }
 
@@ -303,8 +329,7 @@ export function draw() {
        <div class="gRail h" id="gRailH"></div>
        <div id="gMarks"></div>
        <div id="gLive"></div>
-       <div class="gHint">drag from the top or left edge for a line &middot; double-click for a point
-         &middot; they stay put across every clip</div>`;
+       <div class="gHint"></div>`;
     buildMarks();
     railDrag(host.querySelector('#gRailV'), 'v');
     railDrag(host.querySelector('#gRailH'), 'h');
@@ -346,9 +371,12 @@ function nearestCut(t) {
 }
 
 function eyeTrace(edge) {
+  /* Nothing recorded either side of this cut yet, so there is nothing to say.
+     A line of text explaining why there is no number is worse than no number:
+     it is on screen constantly, it is about the tool rather than the picture,
+     and you would read it once and then have to look past it forever. */
   const pair = across(edge);
-  if (!pair) return `<div class="gRead dim">eye trace &middot; `
-                  + `scrub across the cut to measure it</div>`;
+  if (!pair) return '';
   const { before, after } = pair;
 
   const jump = Math.round(Math.hypot((after.x - before.x) * 100, (after.y - before.y) * 100));

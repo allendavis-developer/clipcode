@@ -468,6 +468,9 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
        box-shadow:0 0 0 1px rgba(0,0,0,.55)}
 .gMark:hover::before,.gMark:hover::after{background:#8cc6ff}
 .gMark:active{cursor:grabbing}
+/* dragged past the edge of the picture: about to be thrown away, and saying so
+   before you let go rather than after */
+.gMark.gGoing::before,.gMark.gGoing::after{background:#ff5470;opacity:.55}
 
 /* a point: a crosshair, for where the eye is */
 .gMark.point{width:26px;height:26px;margin:-13px 0 0 -13px;cursor:grab}
@@ -486,9 +489,7 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .gRail:hover{background:rgba(78,163,255,.14)}
 .gRail.v{left:0;top:0;bottom:0;width:9px;cursor:col-resize}
 .gRail.h{left:0;top:0;right:0;height:9px;cursor:row-resize}
-.gHint{position:absolute;left:8px;top:8px;padding:3px 8px;border-radius:3px;
-       background:rgba(0,0,0,.6);color:var(--faint);font-family:var(--mono);
-       font-size:10.5px;pointer-events:none}
+.gHint{display:none}
 .gThird{stroke:rgba(255,255,255,.16);stroke-width:.18;vector-effect:non-scaling-stroke}
 .gSafe{fill:none;stroke:rgba(255,255,255,.10);stroke-width:.18;vector-effect:non-scaling-stroke}
 .gSafe.title{stroke-dasharray:2 2}

@@ -136,6 +136,38 @@ ok('lines survive the cut too',
    (await pg.$$eval('.gMark.v', n => n.length)) === 1
    && (await pg.$$eval('.gMark.h', n => n.length)) === 1);
 
+/* ---- getting rid of one ----
+   The clamp that kept guides inside the frame is what made them impossible to
+   delete: there was nowhere to drag one to. */
+const before2 = await pg.$$eval('.gMark', n => n.length);
+const vg = await pg.locator('.gMark.v').first().boundingBox();
+await pg.mouse.move(vg.x + vg.width/2, vg.y + vg.height/2);
+await pg.mouse.down();
+await pg.mouse.move(gb.x - 80, vg.y + vg.height/2, { steps: 12 });
+await pg.mouse.up(); await pg.waitForTimeout(400);
+const after2 = await pg.$$eval('.gMark', n => n.length);
+ok('dragging a guide off the picture removes it', after2 === before2 - 1,
+   `${before2} guides -> ${after2}`);
+
+/* and it stays gone */
+await pg.reload(); await pg.waitForTimeout(1800);
+await pg.click('#btnGuides'); await pg.waitForTimeout(600);
+ok('and it stays removed', (await pg.$$eval('.gMark', n => n.length)) === after2,
+   `${await pg.$$eval('.gMark', n => n.length)} after a reload`);
+
+/* nudging one to the very edge must NOT throw it away */
+const edge = await pg.locator('.gMark.h').first().boundingBox();
+await pg.mouse.move(edge.x + edge.width/2, edge.y + edge.height/2);
+await pg.mouse.down();
+await pg.mouse.move(edge.x + edge.width/2, gb.y + 2, { steps: 8 });
+await pg.mouse.up(); await pg.waitForTimeout(400);
+ok('but nudging one to the edge keeps it',
+   (await pg.$$eval('.gMark.h', n => n.length)) === 1,
+   `${await pg.$$eval('.gMark.h', n => n.length)} horizontal guide(s) left`);
+
+ok('and there is no helper text on the picture',
+   (await pg.$$eval('.gRead', ns => ns.filter(n => /scrub/.test(n.textContent)).length)) === 0);
+
 await pg.locator('#viewer').screenshot({path:'C:/Users/allen/AppData/Local/Temp/claude/C--dev-graphics-channel/ed495a7a-f020-46b1-842d-a9b9efac922b/scratchpad/guides.png'});
 await pg.click('#btnGuides'); await pg.waitForTimeout(400);
 ok('and they turn off again', await pg.evaluate(()=>document.querySelector('#guides').classList.contains('hidden')));
