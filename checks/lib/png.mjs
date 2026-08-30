@@ -105,3 +105,15 @@ export function leaning(buf, a, b, by = 40) {
 
 /** The size of a decoded image, without walking its pixels. */
 export function size(buf) { const im = decode(buf); return { w: im.w, h: im.h }; }
+
+/** Dark pixels inside one box of the image, given as { x0, y0, x1, y1 }. */
+export function darkIn(buf, box, max = 150) {
+  const im = decode(buf);
+  let n = 0;
+  for (let y = Math.max(0, box.y0); y <= Math.min(im.h - 1, box.y1); y++)
+    for (let x = Math.max(0, box.x0); x <= Math.min(im.w - 1, box.x1); x++) {
+      const i = (y * im.w + x) * im.ch;
+      if (im.data[i] < max && im.data[i + 1] < max && im.data[i + 2] < max) n++;
+    }
+  return n;
+}

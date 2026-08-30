@@ -453,6 +453,42 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 #guides{position:absolute;pointer-events:none;z-index:40}
 #guides.hidden{display:none}
 #guides svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+/* the overlay takes the pointer only when guides are on, so a guide can be
+   dragged and dropped; with them off it is display:none and takes nothing */
+#guides{pointer-events:auto}
+/* Both layers span the overlay, so neither may take the pointer itself or it
+   sits on top of the rails and swallows the drag that pulls a guide out. Only
+   the guides themselves are grabbable. */
+#gMarks,#gLive{position:absolute;inset:0;pointer-events:none}
+
+/* A guide you placed. Deliberately unlike the computed dot: a crosshair with
+   arms, because it is a position you are aligning to rather than a blob. */
+.gMark{position:absolute;touch-action:none;pointer-events:auto}
+.gMark::before,.gMark::after{content:'';position:absolute;background:#4ea3ff;
+       box-shadow:0 0 0 1px rgba(0,0,0,.55)}
+.gMark:hover::before,.gMark:hover::after{background:#8cc6ff}
+.gMark:active{cursor:grabbing}
+
+/* a point: a crosshair, for where the eye is */
+.gMark.point{width:26px;height:26px;margin:-13px 0 0 -13px;cursor:grab}
+.gMark.point::before{left:0;right:0;top:12px;height:2px}
+.gMark.point::after{top:0;bottom:0;left:12px;width:2px}
+
+/* a line: right across the frame, for an edge to align to. The hit area is
+   wider than the line so it can be grabbed without aiming at two pixels. */
+.gMark.v{top:0;bottom:0;width:11px;margin-left:-5px;cursor:col-resize}
+.gMark.v::before{top:0;bottom:0;left:4px;width:2px}
+.gMark.h{left:0;right:0;height:11px;margin-top:-5px;cursor:row-resize}
+.gMark.h::before{left:0;right:0;top:4px;height:2px}
+
+/* the rails you pull one out of */
+.gRail{position:absolute;background:transparent}
+.gRail:hover{background:rgba(78,163,255,.14)}
+.gRail.v{left:0;top:0;bottom:0;width:9px;cursor:col-resize}
+.gRail.h{left:0;top:0;right:0;height:9px;cursor:row-resize}
+.gHint{position:absolute;left:8px;top:8px;padding:3px 8px;border-radius:3px;
+       background:rgba(0,0,0,.6);color:var(--faint);font-family:var(--mono);
+       font-size:10.5px;pointer-events:none}
 .gThird{stroke:rgba(255,255,255,.16);stroke-width:.18;vector-effect:non-scaling-stroke}
 .gSafe{fill:none;stroke:rgba(255,255,255,.10);stroke-width:.18;vector-effect:non-scaling-stroke}
 .gSafe.title{stroke-dasharray:2 2}
@@ -465,6 +501,7 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .gDot.gNext{background:rgba(92,184,92,.95);box-shadow:0 0 0 3px rgba(92,184,92,.22)}
 .gTrace line{stroke:rgba(255,255,255,.6);stroke-width:1.4;stroke-dasharray:4 3;
              vector-effect:non-scaling-stroke}
+.gRead.dim{color:var(--faint)}
 .gRead{position:absolute;left:8px;bottom:8px;padding:3px 8px;border-radius:3px;
        background:rgba(0,0,0,.66);color:#e8e8e8;font-family:var(--mono);font-size:11px;
        white-space:nowrap}

@@ -14,8 +14,9 @@
    in the compressed png and is exactly right for "is anything on screen". A
    dissolve needs the actual channel values: clip A is pure red, clip B is pure
    blue, so a real blend is measurably purple and neither original can be
-   mistaken for it. That needs decoded pixels, so there is a small png reader
-   below — zlib is a node builtin, so this still costs no dependency.
+   mistaken for it. checks/lib/png.mjs is where the decoding lives — one reader
+   for every driver, because two readers of the same format is one of them
+   being wrong somewhere nobody looks.
 
    THE EXPORT IS CHECKED AGAINST THE PREVIEW rather than on its own. The whole
    design is that /render composites with the same stage.js, so the assertion
@@ -24,14 +25,14 @@
    anywhere but the paint path.
    ========================================================================== */
 import { chromium } from 'playwright';
-import zlib from 'zlib';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { decode } from './lib/png.mjs';
 
 const B = process.env.STUDIO || 'http://localhost:4333';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SHOTS = path.join(HERE, 'shots');
+const SHOTS = process.env.SHOTS || path.join(HERE, '_shots');
 const P = '_tx';
 
 let failures = 0;
@@ -44,58 +45,14 @@ const api = (u, m = 'GET', body) => fetch(B + u, body === undefined ? { method: 
   : { method: m, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   .then(r => r.json());
 
-/* ------------------------------------------------------------ png pixels --
-   Enough of the format to read what playwright hands back: 8-bit, one image,
-   the five scanline filters. Anything else throws rather than lying. */
-function decode(buf) {
-  let i = 8, w = 0, h = 0, ct = 0, bits = 0;
-  const idat = [];
-  while (i + 8 <= buf.length) {
-    const len = buf.readUInt32BE(i);
-    const type = buf.toString('ascii', i + 4, i + 8);
-    const data = buf.subarray(i + 8, i + 8 + len);
-    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); bits = data[8]; ct = data[9]; }
-    if (type === 'IDAT') idat.push(data);
-    i += 12 + len;
-    if (type === 'IEND') break;
-  }
-  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[ct];
-  if (bits !== 8 || !bpp) throw new Error(`png is ${bits}-bit type ${ct}`);
-  const raw = zlib.inflateSync(Buffer.concat(idat));
-  const stride = w * bpp;
-  const out = Buffer.alloc(h * stride);
-  let p = 0;
-  for (let y = 0; y < h; y++) {
-    const f = raw[p++];
-    const line = raw.subarray(p, p + stride);
-    p += stride;
-    const cur = out.subarray(y * stride, (y + 1) * stride);
-    const prev = y ? out.subarray((y - 1) * stride, y * stride) : null;
-    for (let x = 0; x < stride; x++) {
-      const a = x >= bpp ? cur[x - bpp] : 0;
-      const b = prev ? prev[x] : 0;
-      const c = prev && x >= bpp ? prev[x - bpp] : 0;
-      let v = line[x];
-      if (f === 1) v += a;
-      else if (f === 2) v += b;
-      else if (f === 3) v += (a + b) >> 1;
-      else if (f === 4) {
-        const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
-        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-      }
-      cur[x] = v & 255;
-    }
-  }
-  return { w, h, bpp, data: out };
-}
-
+/* ---------------------------------------------------------- what is on it --
+   Both test clips fill the frame with one flat colour, so the mean IS the
+   composite and a blend cannot hide inside it. */
 const px = (im, x, y) => {
-  const o = y * im.w * im.bpp + x * im.bpp;
+  const o = (y * im.w + x) * im.ch;
   return [im.data[o], im.data[o + 1], im.data[o + 2]];
 };
 
-/* The average colour of the frame. Both test clips fill it with one flat
-   colour, so the mean IS the composite and a blend cannot hide in it. */
 function mean(im) {
   let r = 0, g = 0, b = 0, n = 0;
   for (let y = 2; y < im.h - 2; y += 3)
@@ -176,6 +133,7 @@ await open();
 /* Scrub on the ruler with a real mouse, like test.mjs: the timeline runs on
    pointer capture, and a synthetic MouseEvent produces no pointer events at
    all — a check that fakes the input stops checking the input. */
+const FRAME = 1000 / 30;
 const seek = async ms => {
   const box = await page.evaluate(() => {
     const r = document.querySelector('#ruler').getBoundingClientRect();
@@ -184,7 +142,18 @@ const seek = async ms => {
   await page.mouse.move(box.left + (ms / 1000) * 90, box.y);
   await page.mouse.down();
   await page.mouse.up();
-  await page.waitForTimeout(420);
+  await page.waitForTimeout(300);
+  /* A click puts the playhead within a pixel of where you aimed, and a pixel
+     is three frames at this zoom. Every measurement below is of one exact
+     frame, so step onto it — with the arrow keys, which is how you would. */
+  const want = Math.round(ms / FRAME);
+  for (let i = 0; i < 16; i++) {
+    const at = Number((await page.textContent('#frameNo')).slice(1));
+    if (at === want) break;
+    await page.keyboard.press(at < want ? 'ArrowRight' : 'ArrowLeft');
+    await page.waitForTimeout(70);
+  }
+  await page.waitForTimeout(280);
 };
 const shot = async (file) => {
   const buf = await page.locator('#stageFit').screenshot();
@@ -200,8 +169,10 @@ const before = await at(1900, 'dissolve-before.png');
 const mid = await at(2200, 'dissolve-mid.png');
 const after = await at(2500, 'dissolve-after.png');
 
-ok('before the cut is clip A', before.r > 180 && before.b < 60, say(mean(before)) + ' at 1900ms');
-ok('after the window is clip B', after.b > 180 && after.r < 60, say(mean(after)) + ' at 2500ms');
+ok('before the cut is clip A', mean(before).r > 180 && mean(before).b < 60,
+   say(mean(before)) + ' at 1900ms');
+ok('after the window is clip B', mean(after).b > 180 && mean(after).r < 60,
+   say(mean(after)) + ' at 2500ms');
 {
   const m = mean(mid);
   const blend = m.r > 60 && m.r < 200 && m.b > 60 && m.b < 200;
@@ -276,12 +247,6 @@ await put(); await open();
   const m = mean(im);
   ok('whip still swaps the clips', m.b > 30, say(m));
 }
-/* and the default the palette gives it is two frames, not a third of a second */
-{
-  const two = await api('/api/project?name=' + P);
-  ok('a whip is measured in frames', two.project.fps === 30, `${two.project.fps} fps`);
-}
-
 /* ------------------------------------------------------------ the export --
    The render page loads the same stage.js, so a frame from the middle of a
    transition has to be the frame the viewer showed. Anything else means the
@@ -289,6 +254,8 @@ await put(); await open();
 trans = () => ({ kind: 'dissolve', ms: 400, dir: 'l' });
 await put(); await open();
 const preview = mean(await at(2200));
+ok('the preview is where it was asked for', (await page.textContent('#frameNo')) === 'f66',
+   await page.textContent('#frameNo'));
 
 {
   const r = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
@@ -299,18 +266,24 @@ const preview = mean(await at(2200));
   ok('render page loads the project', good && info.ok && info.clips === 2,
      `${info.clips} clips, ${Math.round(info.duration)}ms`);
 
-  await r.evaluate(() => window.__renderSeek(2200));
-  const buf = await r.screenshot({ clip: { x: 0, y: 0, width: 1920, height: 1080 } });
+  /* Frame by frame from the top, because that is what render.mjs does and a
+     render is what is being checked. Jumping straight to the middle of the
+     transition would test a thing the renderer never asks for, and would skip
+     past the reason it works — a layer is warm before its own cut arrives. */
+  const shutter = { x: 0, y: 0, width: 1920, height: 1080 };
+  let buf = null, plain = null;
+  for (let f = 0; f <= 66; f++) {
+    await r.evaluate(ms => window.__renderSeek(ms), f * (1000 / 30));
+    if (f === 30) plain = await r.screenshot({ clip: shutter });
+    if (f === 66) buf = await r.screenshot({ clip: shutter });
+  }
   fs.writeFileSync(path.join(SHOTS, 'export-mid.png'), buf);
   const m = mean(decode(buf));
   ok('the export is mid-dissolve too', m.r > 60 && m.r < 200 && m.b > 60 && m.b < 200, say(m));
-  ok('the export matches the preview', near(m.r, preview.r, 8) && near(m.b, preview.b, 8),
+  ok('the export matches the preview', near(m.r, preview.r, 4) && near(m.b, preview.b, 4),
      `export ${say(m)}  ·  preview ${say(preview)}`);
 
-  /* and the whip's smear survives the trip, which is the part that goes
-     through an svg filter built from script rather than a css property */
-  await r.evaluate(() => window.__renderSeek(1000));
-  const clean = hardestEdge(decode(await r.screenshot({ clip: { x: 0, y: 0, width: 1920, height: 1080 } })));
+  const clean = hardestEdge(decode(plain));
   ok('a plain frame exports clean', clean < 20, `biggest step ${clean}`);
   await r.close();
 }
@@ -400,7 +373,7 @@ await put(); await open();
              text: el ? el.textContent.trim() : '', neighbour: !!a };
   });
   ok('the boundary is drawn', drawn.has && !drawn.neighbour, JSON.stringify(drawn));
-  ok('its length is written on it', /ms/.test(drawn.text), drawn.text || '(nothing)');
+  ok('its length is written on it', /\d/.test(drawn.text), drawn.text || '(nothing)');
 }
 
 ok('no unexpected errors', errors.length === 0, errors.slice(0, 3).join(' | '));

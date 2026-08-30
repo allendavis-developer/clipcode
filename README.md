@@ -53,6 +53,7 @@ server.mjs              http routing, and nothing else
     state.js            the edit, and writing it to disk
     stage.js            compositing whatever is under the playhead
     timeline.js         arranging clips with a mouse
+    transitions.js      what a cut looks like when a cut is not enough
     transport.js        the clock, the playhead, the keyboard
     editor.js           the code pane and a clip's source
     scene.js            the chained, choreography-first layer clips are written in
@@ -435,6 +436,69 @@ which is a number you can act on and could not otherwise get.
 
 ---
 
+## Transitions
+
+A cut is hard in, hard out, and most of an edit should stay that way. What a
+cut cannot do is a section change: the short, aggressive smears and dips that
+say *and now something else*. So a boundary can carry one.
+
+```
+dissolve   320ms    one picture becomes the other
+dip        420ms    out to nothing, and in again
+push       420ms    the new picture shoves the old one out of frame
+whip       2 frames a directional motion-blurred smear
+```
+
+**A transition is a property of the incoming clip's head** — `trans:
+{kind, ms, dir}` in `project.json`, meaning *this is how I come in*. Not a
+free-standing object on the boundary, because a boundary is not a thing you
+can hold: move either clip and it stops existing. A head travels with the clip
+that owns it, a copy copies it, deleting the clip deletes it, and nothing can
+be left dangling. It also gives the no-partner case for free — a head
+transition on the first clip of a track is a fade up from black.
+
+**The window sits after the cut, and the outgoing clip overruns into it.** The
+two clips never overlap on the timeline: the cut stays where you put it,
+nothing ripples, `duration()` is unchanged and *next edit* still lands on the
+cut. What happens instead is that for `ms` after the cut the outgoing clip
+keeps painting, asked for a time past its own out point, underneath the
+incoming one — which plays from its in point, normally.
+
+Centring the window on the cut would need the incoming clip to paint *before*
+its in point, and the in point is the frame you chose as the first frame;
+showing what comes before it is showing material you rejected. And a code clip
+never runs out of handle, because every animated number is a track and a track
+holds its last value outside its range — so a clip asked for a time past its
+end gives you its final pose rather than nothing.
+
+**It is a pure function of the timeline position,** like everything else here.
+At time X the composite is fully determined by X and the four stored numbers.
+Nothing fades over wall-clock time and nothing remembers that it started, which
+is why a render is the preview: the compositing lives in `stage.js`'s paint
+path, and `/render` loads the same file.
+
+### With a mouse
+
+- **Drag a kind from the toolbar onto a cut.** Dropping the same kind a second
+  time steers it — `push` again turns it left, right, up, down.
+- **Or push one clip into the one before it.** The overlap you make is the
+  length; on release the cut goes back to where it was and the overlap becomes
+  the window after it. Over two seconds it stays an ordinary move, because that
+  is someone rearranging the edit.
+- **Drag its edge for the length**, like any other edge, and **to nothing to
+  remove it**. **Double-click the edge to steer** a push or a whip.
+
+On the timeline it is a bowtie at the head of the incoming clip, coloured by
+kind, with its length written across it — in milliseconds when there is room
+and in frames when there is not, because a whip is two frames long and *2f* is
+the number that means something about it.
+
+`node studio/checks/transitions.mjs` measures it: pure red against pure blue,
+so the middle of a dissolve is measurably purple and neither original can be
+mistaken for it, and the exported frame is compared against the previewed one.
+
+---
+
 ## The edit-see loop
 
 Every other cost in this editor is paid once. Waiting to see your change is
@@ -455,7 +519,6 @@ paid on every edit, so it gets its own design:
 
 ## Known gaps
 
-- **Cuts only** — no transitions.
 - Placing an element means typing coordinates; dragging it in the viewer and
   having that write back into the code is not built yet. A `path()`'s points
   are draggable — that is the shape editor — but a text or an image is not.

@@ -107,11 +107,14 @@ function txEl(c) {
   el.title = TX.describe(tx) + ' — drag this edge for its length, '
     + 'double-click it to steer, drag it to nothing to remove';
 
-  const bits = [];
-  if (w > 70) bits.push(tx.kind + (TX.steerable(tx.kind) ? ' ' + TX.ARROW[tx.dir] : ''));
-  if (w > 36) bits.push(Math.round(tx.ms) + 'ms');
-  el.innerHTML = (bits.length ? `<span class="txn">${bits.join(' · ')}</span>` : '')
-    + `<i class="txh"></i>`;
+  /* Three ways to say the same length, in as many characters as there is
+     room for. Frames rather than milliseconds when it is down to two
+     characters: a whip is two frames long and "2f" is the number that means
+     something about it. */
+  const label = w > 76 ? `${tx.kind}${TX.steerable(tx.kind) ? ' ' + TX.ARROW[tx.dir] : ''} · ${Math.round(tx.ms)}ms`
+              : w > 44 ? `${Math.round(tx.ms)}ms`
+              : w > 17 ? `${Math.round(tx.ms / qTime(1))}f` : '';
+  el.innerHTML = (label ? `<span class="txn">${label}</span>` : '') + `<i class="txh"></i>`;
   return el;
 }
 
@@ -323,6 +326,9 @@ function markPending(id, ms) {
   const el = document.querySelector(`.clip[data-id="${id}"]`);
   if (!el) return;
   el.classList.add('txMaking');
+  /* the length being proposed replaces the one it already has, so only one
+     block is ever drawn */
+  for (const old of el.querySelectorAll('.tx')) old.remove();
   const g = document.createElement('div');
   g.className = 'tx tx-pending';
   g.style.width = Math.max(15, pxOf(ms)) + 'px';

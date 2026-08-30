@@ -144,6 +144,12 @@ function looks(all, t) {
   return look;
 }
 
+/* How far either side of the playhead a clip's layer is kept loaded. Two
+   seconds is long enough for an iframe to be ready before its cut arrives at
+   any sane frame rate, and short enough that a fifty-shot timeline is never
+   fifty live iframes. */
+const WARM = 2000;
+
 let painting = false, lastFrame = -1;
 export async function paint(force = false) {
   if (painting) return;
@@ -161,16 +167,41 @@ export async function paint(force = false) {
     const visible = all.filter(c => (t >= c.start && t < clipEnd(c)) || look.has(c.id));
     const want = new Set(visible.map(c => c.id));
 
-    for (const [id, L] of layers)
-      if (!want.has(id)) { L.el.remove(); layers.delete(id); }
+    /* A LAYER IS BUILT BEFORE IT IS NEEDED, and retired a while after.
 
-    for (const c of visible) {
+       An iframe takes several frames to load, and a render seeks and
+       screenshots without waiting for one — so a layer first built at the
+       instant of its own cut is a layer that is still blank when the shutter
+       goes, and the first frames of every shot but the first export black.
+       Tearing it down the moment the playhead leaves is the same mistake at
+       the other end, and a transition needs BOTH clips warm at once.
+
+       WARM is a window around the playhead, so this is still a function of t
+       and of nothing else. It decides which layers EXIST; it never decides
+       what any of them paints. */
+    const near = all.filter(c => !want.has(c.id)
+      && t >= c.start - WARM && t <= clipEnd(c) + WARM);
+    const live = new Set([...want, ...near.map(c => c.id)]);
+
+    for (const [id, L] of layers)
+      if (!live.has(id)) { L.el.remove(); layers.delete(id); }
+
+    for (const c of [...visible, ...near]) {
       let L = layers.get(c.id);
       if (!L || L.src !== c.src || L.kind !== c.kind) {
         if (L) L.el.remove();
         L = makeLayer(c);
         layers.set(c.id, L);
       }
+      /* Loaded and waiting for its cut. Hidden rather than removed, and
+         paused rather than left running, because a video nobody can see is
+         still a video decoding frames. */
+      if (!want.has(c.id)) {
+        L.el.style.visibility = 'hidden';
+        if (L.el.pause && !L.el.paused) L.el.pause();
+        continue;
+      }
+      L.el.style.visibility = '';
       const style = look.get(c.id);
       /* Two clips in a transition are on the same track and would otherwise
          stack in whatever order their layers happen to sit in the document.

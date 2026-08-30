@@ -126,6 +126,11 @@
      never pays for the pass, and one that stops masking still gets the mask
      taken off the element it was on. */
   var everMasked = false;
+  /* What the last matte pass hid and what it masked. Kept so the pass can undo
+     exactly its own work: clearing visibility and mask on everything would be
+     shorter and would also silently delete a .style({ visibility: 'hidden' })
+     the clip asked for. */
+  var wasHidden = {}, wasWearing = {};
   var camera = null;                /* the one camera, rebuilt each frame */
   var W_ = W.__stageW, H_ = W.__stageH;
   var idFor = function (kind) { return 's' + (counter++) + kind.charAt(0); };
@@ -1640,11 +1645,20 @@
   function applyMasks() {
     if (!everMasked) return;
     var Wd = W_ || 1920, Ht = H_ || 1080;
-    var svg = null, hidden = {}, i, n, el, src;
+    var svg = null, hidden = {}, wearing = {}, i, n, el, src, id;
 
     for (i = 0; i < nodes.length; i++)
       if (nodes[i].mask && nodes[i].mask.of && !nodes[i].mask.show)
         hidden[nodes[i].mask.of.id] = 1;
+
+    /* Undo only what a previous frame's pass did. Clearing every element's
+       visibility and mask unconditionally would be simpler and would also
+       quietly delete a .style({ visibility: 'hidden' }) the clip asked for —
+       so the pass remembers what it touched rather than owning the property. */
+    for (id in wasHidden) if (!hidden[id]) {
+      el = D.getElementById(id);
+      if (el) el.style.visibility = '';
+    }
 
     for (i = 0; i < nodes.length; i++) {
       n = nodes[i];
@@ -1654,26 +1668,19 @@
          compositor flips when a layer becomes a track matte. visibility rather
          than display, because a thing with no box cannot be measured and the
          matte is measured from it. */
-      var vis = hidden[n.id] ? 'hidden' : '';
-      if (el.style.visibility !== vis) el.style.visibility = vis;
-
-      if (!n.mask) {
-        /* Cleared, not merely not-set. A mask left over from a frame that had
-           one is exactly the kind of memory the purity rule is about. */
-        if (el.style.maskImage || el.style.webkitMaskImage)
-          el.style.maskImage = el.style.webkitMaskImage = '';
-        continue;
-      }
+      if (hidden[n.id]) el.style.visibility = 'hidden';
+      if (!n.mask) continue;
+      wearing[n.id] = 1;
       src = n.mask.of && D.getElementById(n.mask.of.id);
       if (!src) continue;
       svg = svg || maskPlane();
-      if (!svg) return;
+      if (!svg) break;                    /* no stage yet; still tidy up below */
 
-      var id = n.id + '_matte';
-      var m = D.getElementById(id);
+      var mid = n.id + '_matte';
+      var m = D.getElementById(mid);
       if (!m) {
         m = svgNode('mask');
-        m.id = id;
+        m.id = mid;
         /* A region in the element's own pixels rather than a share of its box,
            so a matte that starts off the side of the thing is still there when
            it arrives. */
@@ -1705,9 +1712,18 @@
       soft.appendChild(into);
       m.appendChild(soft);
 
-      el.style.maskImage = 'url(#' + id + ')';
-      el.style.webkitMaskImage = 'url(#' + id + ')';
+      el.style.maskImage = 'url(#' + mid + ')';
+      el.style.webkitMaskImage = 'url(#' + mid + ')';
     }
+
+    /* A mask left over from a frame that had one is exactly the kind of memory
+       the purity rule is about, so it comes off the same way it went on. */
+    for (id in wasWearing) if (!wearing[id]) {
+      el = D.getElementById(id);
+      if (el) el.style.maskImage = el.style.webkitMaskImage = '';
+    }
+    wasHidden = hidden;
+    wasWearing = wearing;
   }
 
   /** captions([[text, ms], ...])   @make

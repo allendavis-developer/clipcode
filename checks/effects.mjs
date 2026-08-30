@@ -10,8 +10,8 @@
    compressed screenshot, which is the right question for "did anything appear
    at all" and useless for "how much of it appeared" — a half-revealed
    headline and a whole one compress to about the same size. A matte is only
-   correct if the AREA is right, so checks/png.mjs inflates the screenshot and
-   these count real pixels, sample real colours, and measure real bounds.
+   correct if the AREA is right, so checks/lib/png.mjs inflates the screenshot
+   and these count real pixels, sample colours, and measure real bounds.
 
    The claim each mask check makes is the honest one: with the wipe part way
    across, the lit area must sit STRICTLY BETWEEN the hidden frame and the
@@ -22,13 +22,13 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { lit, dark, bounds, at, leaning, size } from './png.mjs';
+import { lit, bounds, at, leaning, size, darkIn } from './lib/png.mjs';
 
 const B = process.env.STUDIO || 'http://localhost:4332';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SHOTS = process.env.SHOTS || path.join(HERE, '_shots');
 const P = '_effects';
-const STAGE_W = 1920, STAGE_H = 1080;
+const STAGE_W = 1920;
 
 let failures = 0;
 const ok = (name, pass, detail = '') => {
@@ -49,6 +49,9 @@ const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
 const errors = [];
 page.on('pageerror', e => errors.push('page: ' + e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 140)); });
+/* A new clip asks for a name. Playwright dismisses a prompt unless something
+   answers it, and a dismissed prompt means no clip and an empty stage. */
+page.on('dialog', d => d.accept('fx'));
 
 const type = async code => {
   await page.evaluate(c => document.querySelector('.CodeMirror').CodeMirror.setValue(c), code);
@@ -129,9 +132,14 @@ ok('the edge is where the wipe edge is',
 /* ------------------------------------------------------------------------ */
 /* 2. The shape doing the cutting is not in the picture unless asked for. */
 await type(WIPE('showWhere(wipe, { show: true })'));
-const shown = lit(await frameAt(500, 'matte-show.png'));
-ok('{ show: true } draws the matte shape too', shown > m5 * 3,
-   `${m5} hidden -> ${shown} shown`);
+const shownBuf = await frameAt(500, 'matte-show.png');
+const shown = lit(shownBuf), shownBox = bounds(shownBuf);
+ok('{ show: true } draws the matte shape too', shown > m5 * 1.8,
+   `${m5} lit with the wipe hidden -> ${shown} with it shown`);
+/* and it is the WIPE that appeared: it runs off the left of frame, where with
+   the matte hidden nothing is lit left of the block's own edge at 360 */
+ok('and it is the wipe that appeared', shownBox && shownBox.x0 < 4 && edge.x0 > 4,
+   `lit from x${shownBox && shownBox.x0} shown, from x${edge.x0} hidden`);
 
 /* ------------------------------------------------------------------------ */
 /* 3. The inverse. Same wipe, same instant: what one shows the other hides, so
@@ -163,6 +171,32 @@ const db = bounds(await frameAt(500));
 const dbFull = bounds(await frameAt(1200));
 ok('and only as far as it has drawn', db && dbFull && db.x1 < dbFull.x1 - 40,
    db && dbFull ? `reaches x${db.x1} at 500ms, x${dbFull.x1} when done` : 'nothing lit');
+
+/* ------------------------------------------------------------------------ */
+/* 4b. feather softens the edge. A hard matte puts every pixel at black or
+   white; a feathered one has a ramp between them, which is what to count. */
+const ramp = buf => lit(buf, 60) - lit(buf, 200);   /* pixels that are neither */
+await type(WIPE('showWhere(wipe)'));
+const hard = ramp(await frameAt(500, 'feather-off.png'));
+await type(WIPE('showWhere(wipe, { feather: 50 })'));
+const softEdge = ramp(await frameAt(500, 'feather-on.png'));
+ok('feather ramps the edge instead of cutting it', softEdge > hard * 4 && softEdge > 1500,
+   `${hard} half-lit pixels hard -> ${softEdge} feathered`);
+
+/* 4c. The matte is anchored to the SCENE, not to the thing it cuts. If it were
+   attached to the element, moving the element would move its own reveal with
+   it and the revealed fraction would never change — which is not what a matte
+   is. Here a still wipe covers the left of frame and the block slides out of
+   it, so less and less of it shows. */
+await type(`
+const head = shape({ width: 800, height: 400, background: '#fff' }).at(200, 340);
+const gate = shape({ width: 900, height: 600, background: '#fff' }).at(0, 240);
+head.move({ x: 700 }, 1000);
+head.showWhere(gate);`);
+const slid0 = lit(await frameAt(0, 'anchored-0.png'));
+const slid9 = lit(await frameAt(1000, 'anchored-1000.png'));
+ok('the matte stays in the scene, not on the layer', slid9 < slid0 * 0.35 && slid0 > 10000,
+   `${slid0} lit before the block moves, ${slid9} after it slides out of the gate`);
 
 /* ------------------------------------------------------------------------ */
 /* 5. A matte belongs to the composition, so the camera carries it. If the mask
@@ -203,9 +237,11 @@ await type(`
 shape({ width: 300, height: 300, background: '#fff' }).at(810, 390)
   .enter(400, { opacity: [1, 1], glow: [0, 90] });`);
 const gOff = await frameAt(0, 'glow-0.png');
-const gOn = await frameAt(400, 'glow-400.png');
+/* read while THAT frame is on screen: styleOf reports the live element, so a
+   filter read after the next frameAt is the next frame's answer */
 const f0 = await styleOf('#__world > div', 'filter');
-const f4 = await (async () => { await frameAt(400); return styleOf('#__world > div', 'filter'); })();
+const gOn = await frameAt(400, 'glow-400.png');
+const f4 = await styleOf('#__world > div', 'filter');
 ok('glow is off when the track says 0', f0 === 'none', String(f0));
 ok('glow stacks two haloes for a bloom',
    (String(f4).match(/drop-shadow/g) || []).length === 2, String(f4).slice(0, 90));
@@ -221,12 +257,21 @@ await type(`
 shape({ width: 1920, height: 1080, background: '#fff' }).at(0, 0);
 shape({ width: 400, height: 240, background: '#2b2f3a' }).at(760, 380)
   .enter(400, { opacity: [1, 1], shadowY: [0, 90], shadowBlur: [0, 60] });`);
-const sOff = dark(await frameAt(0, 'shadow-0.png'), 150);
-const sOn = dark(await frameAt(400, 'shadow-400.png'), 150);
-ok('shadow darkens the ground under it', sOn > sOff * 1.35,
-   `${sOff} dark pixels -> ${sOn}`);
+/* Measured in the band strictly BELOW the card, y 630..790, where the card
+   itself is not: a shadow that darkens its own footprint has proved nothing. */
+const under = buf => {
+  const s = size(buf).w / STAGE_W;
+  return darkIn(buf, { x0: Math.round(700 * s), y0: Math.round(630 * s),
+                       x1: Math.round(1220 * s), y1: Math.round(790 * s) });
+};
+const sOff = under(await frameAt(0, 'shadow-0.png'));
+const shadowNow = await frameAt(400, 'shadow-400.png');
+const sOn = under(shadowNow);
+ok('shadow darkens the ground below it', sOff < 40 && sOn > 400,
+   `${sOff} dark pixels under the card at rest -> ${sOn} with a 90px shadow`);
 ok('and it is one drop-shadow with the offset asked for',
-   /drop-shadow\(0px 90px 60px/.test(String(await styleOf('#__world > div:nth-child(2)', 'filter'))),
+   /drop-shadow\(rgba?\([^)]*\) 0px 90px 60px\)/
+     .test(String(await styleOf('#__world > div:nth-child(2)', 'filter'))),
    String(await styleOf('#__world > div:nth-child(2)', 'filter')).slice(0, 70));
 
 /* 10. tint: the colour of a pixel, not the name of a filter. */
@@ -258,13 +303,31 @@ ok('text is filled with the gradient, not a colour',
    /linear-gradient/.test(String(await styleOf('#__world > div', 'backgroundImage')))
    && /text/.test(String(await styleOf('#__world > div', 'webkitBackgroundClip'))),
    String(await styleOf('#__world > div', 'webkitBackgroundClip')));
-ok('and both ends of it are on screen',
-   leaning(tg, 0, 1, 50) > 200 && leaning(tg, 1, 0, 50) > 200,
-   `${leaning(tg, 0, 1, 50)} red-leaning, ${leaning(tg, 1, 0, 50)} green-leaning pixels`);
 const shiftA = String(await styleOf('#__world > div', 'backgroundPosition'));
-await frameAt(600, 'gradient-shift.png');
+const tg2 = await frameAt(600, 'gradient-shift.png');
 const shiftB = String(await styleOf('#__world > div', 'backgroundPosition'));
 ok('gradientShift sweeps it across', shiftA !== shiftB, `${shiftA} -> ${shiftB}`);
+/* The sweep is only real if the LETTERS change colour. With the gradient three
+   times the width of the word, position 0% shows its red end and 100% its
+   green one, so the same pixels lean the other way. */
+ok('and the letters change colour as it does',
+   leaning(tg, 0, 1, 50) > 200 && leaning(tg, 1, 0, 50) < 50
+   && leaning(tg2, 1, 0, 50) > 200 && leaning(tg2, 0, 1, 50) < 50,
+   `at 0ms ${leaning(tg, 0, 1, 50)} red / ${leaning(tg, 1, 0, 50)} green, `
+   + `at 600ms ${leaning(tg2, 0, 1, 50)} red / ${leaning(tg2, 1, 0, 50)} green`);
+
+/* A gradient on a group runs across the GROUP, not once per child, which is
+   what makes it a fill for a phrase rather than a stripe on each word. */
+await type(`
+items(['ONE TWO', 'THREE FOUR']).layout('column', { gap: 10 })
+  .font('Figtree Black', 160).at(160, 320)
+  .gradient(['#ff2020', '#20ff20']);`);
+const grp = await frameAt(0, 'gradient-group.png');
+const grpBox = bounds(grp, 30);
+ok('a gradient spans a whole group',
+   leaning(grp, 0, 1, 50) > 500 && leaning(grp, 1, 0, 50) > 500 && grpBox.h > 60,
+   `${leaning(grp, 0, 1, 50)} red-leaning and ${leaning(grp, 1, 0, 50)} green-leaning `
+   + `over ${grpBox.w}x${grpBox.h} of type`);
 
 /* 12. outline: hollow type is the stroke and nothing else. */
 await type(`

@@ -1,31 +1,34 @@
 /* Guides and eye trace, checked by driving the app. */
 import { chromium } from 'playwright'; import fs from 'fs'; import path from 'path';
+import { fileURLToPath } from 'url';
 const B = process.env.STUDIO || 'http://localhost:4321', P = '_guides';
-const HERE = 'studio';
+/* from this file, not from the working directory — a driver has to run the
+   same whether it is started by hand or by checks/run.mjs */
+const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let bad = 0;
 const ok = (n, p, d='') => { if(!p) bad++; console.log(`  ${p?'ok  ':'FAIL'}  ${n.padEnd(40)} ${d}`); };
 
-fs.rmSync(HERE+'/projects/'+P, {recursive:true, force:true});
+fs.rmSync(path.join(HERE,'projects',P), {recursive:true, force:true});
 await fetch(B+'/api/project/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:P})});
-const dir = HERE+'/projects/'+P; fs.mkdirSync(dir+'/clips',{recursive:true});
+const dir = path.join(HERE,'projects',P); fs.mkdirSync(path.join(dir,'clips'),{recursive:true});
 /* two clips whose subject sits in opposite corners: a deliberately bad cut */
-fs.writeFileSync(dir+'/clips/left.js',
+fs.writeFileSync(path.join(dir,'clips','left.js'),
   `duration(1000);\ntext('LEFT').size(200).at(120, 160);`);
-fs.writeFileSync(dir+'/clips/right.js',
+fs.writeFileSync(path.join(dir,'clips','right.js'),
   `duration(1000);\ntext('RIGHT').size(200).at(1400, 820);`);
 /* and one that matches the outgoing position */
 /* Its subject sits where the OUTGOING clip left the eye, which is the cut that
    should read as matched. It follows right.js, not left.js — getting that
    backwards is what made this check fail the first time, and the code was
    right about the 88% jump it reported. */
-fs.writeFileSync(dir+'/clips/near.js',
+fs.writeFileSync(path.join(dir,'clips','near.js'),
   `duration(1000);\ntext('NEAR').size(200).at(1390, 810);`);
-const pj = JSON.parse(fs.readFileSync(dir+'/project.json','utf8'));
+const pj = JSON.parse(fs.readFileSync(path.join(dir,'project.json'),'utf8'));
 pj.tracks[0].clips = [
   {id:'l',kind:'code',src:'clips/left.js', start:0,   in:0,out:1000,natural:1000},
   {id:'r',kind:'code',src:'clips/right.js',start:1000,in:0,out:1000,natural:1000},
   {id:'n',kind:'code',src:'clips/near.js', start:2000,in:0,out:1000,natural:1000}];
-fs.writeFileSync(dir+'/project.json', JSON.stringify(pj));
+fs.writeFileSync(path.join(dir,'project.json'), JSON.stringify(pj));
 
 const br = await chromium.launch();
 const pg = await br.newPage({viewport:{width:1600,height:950}});
@@ -54,6 +57,10 @@ const f2 = await focus();
 ok('and it follows the subject to the other corner', f2 && f2.x > 60 && f2.y > 60,
    f2 ? `${f2.x.toFixed(0)}%, ${f2.y.toFixed(0)}% for a word at (1400, 820)` : 'no marker');
 
+/* The eye trace is sampled as the playhead goes past, not re-derived: the
+   outgoing clip is unmounted the moment you leave it, so nothing can be asked
+   about it afterwards. Which means the check has to travel the cut too. */
+for (const ms of [800, 900, 980, 1020, 1100, 1200]) await seek(ms);
 await seek(1010);
 const read1 = await pg.evaluate(()=>{const r=document.querySelector('.gRead'); return r?r.textContent:null;});
 ok('a cut shows how far the eye must jump', /eye trace/.test(read1||''), read1||'nothing shown');
@@ -61,11 +68,73 @@ const jump1 = Number((/(\d+)% of the frame/.exec(read1||'')||[])[1]);
 ok('and calls a corner-to-corner cut a long jump', jump1 > 45 && /long jump/.test(read1),
    `${jump1}% of the frame`);
 
+for (const ms of [1800, 1900, 1980, 2020, 2100, 2200]) await seek(ms);
 await seek(2010);
 const read2 = await pg.evaluate(()=>{const r=document.querySelector('.gRead'); return r?r.textContent:null;});
 const jump2 = Number((/(\d+)% of the frame/.exec(read2||'')||[])[1]);
 ok('a matched cut reads as matched', jump2 < 12 && /matched/.test(read2||''),
    `${jump2}% against the ${jump1}% one`);
+
+/* ---- a guide you place, which is the point of guides ---- */
+await seek(500);
+const box = await pg.locator('#guides').boundingBox();
+await pg.mouse.dblclick(box.x + box.width * 0.25, box.y + box.height * 0.30);
+await pg.waitForTimeout(500);
+const placed = await pg.$$eval('.gMark', ns => ns.map(n => n.style.left));
+ok('double-click drops a guide', placed.length === 1, placed.join(', '));
+
+/* the whole reason it exists: it has to still be there in the next shot */
+await seek(1500);
+const stillThere = await pg.$$eval('.gMark', ns => ns.map(n => n.style.left));
+ok('and it survives the cut into the next clip',
+   stillThere.length === 1 && stillThere[0] === placed[0],
+   `at ${stillThere[0] || 'gone'} in the next clip, was ${placed[0]}`);
+
+/* drag it, with a real mouse */
+const before = (await pg.$$eval('.gMark', ns => ns.map(n => n.style.left)))[0];
+const mk = await pg.locator('.gMark').first().boundingBox();
+await pg.mouse.move(mk.x + mk.width/2, mk.y + mk.height/2);
+await pg.mouse.down();
+await pg.mouse.move(mk.x + mk.width/2 + 180, mk.y + mk.height/2, {steps:10});
+await pg.mouse.up(); await pg.waitForTimeout(400);
+const after = (await pg.$$eval('.gMark', ns => ns.map(n => n.style.left)))[0];
+ok('and it can be dragged', parseFloat(after) > parseFloat(before) + 8,
+   `${before} -> ${after}`);
+
+/* and it is remembered, because a guide you have to replace every session is
+   not a guide */
+await pg.reload(); await pg.waitForTimeout(1800);
+await pg.click('#btnGuides'); await pg.waitForTimeout(600);
+const afterReload = await pg.$$eval('.gMark', ns => ns.map(n => n.style.left));
+ok('and it survives a reload', afterReload.length === 1
+   && Math.abs(parseFloat(afterReload[0]) - parseFloat(after)) < 0.6,
+   `${afterReload[0] || 'gone'} against ${after}`);
+
+/* ---- lines, pulled out from the edges the way a design tool does it ---- */
+const gb = await pg.locator('#guides').boundingBox();
+await pg.mouse.move(gb.x + 4, gb.y + gb.height * 0.5);
+await pg.mouse.down();
+await pg.mouse.move(gb.x + gb.width * 0.62, gb.y + gb.height * 0.5, { steps: 10 });
+await pg.mouse.up(); await pg.waitForTimeout(400);
+const vlines = await pg.$$eval('.gMark.v', ns => ns.map(n => n.style.left));
+ok('dragging from the left edge pulls out a vertical guide',
+   vlines.length === 1 && parseFloat(vlines[0]) > 55 && parseFloat(vlines[0]) < 70,
+   vlines[0] || 'none');
+
+await pg.mouse.move(gb.x + gb.width * 0.5, gb.y + 4);
+await pg.mouse.down();
+await pg.mouse.move(gb.x + gb.width * 0.5, gb.y + gb.height * 0.35, { steps: 10 });
+await pg.mouse.up(); await pg.waitForTimeout(400);
+const hlines = await pg.$$eval('.gMark.h', ns => ns.map(n => n.style.top));
+ok('and from the top edge a horizontal one',
+   hlines.length === 1 && parseFloat(hlines[0]) > 28 && parseFloat(hlines[0]) < 42,
+   hlines[0] || 'none');
+
+/* they are guides, so they outlast the shot they were drawn in */
+await seek(1500);
+ok('lines survive the cut too',
+   (await pg.$$eval('.gMark.v', n => n.length)) === 1
+   && (await pg.$$eval('.gMark.h', n => n.length)) === 1);
 
 await pg.locator('#viewer').screenshot({path:'C:/Users/allen/AppData/Local/Temp/claude/C--dev-graphics-channel/ed495a7a-f020-46b1-842d-a9b9efac922b/scratchpad/guides.png'});
 await pg.click('#btnGuides'); await pg.waitForTimeout(400);
