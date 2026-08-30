@@ -201,20 +201,40 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .CodeMirror-activeline-background{background:#ffffff08}
 .CodeMirror-matchingbracket{color:var(--accent)!important;font-weight:700}
 
-/* the curve editor, docked under the code */
-/* the curve editor — big enough to aim at, docked under the code */
+/* the curve editor — tall, because everything an easing tells you is vertical */
 #curve{flex:0 0 auto;background:#191919;border-top:1px solid var(--line2);padding:0 0 6px}
 .curveHead{display:flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;
-  font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--line2);flex-wrap:wrap}
+  font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--line2)}
 #curveNums{color:var(--accent);margin-left:8px}
-#curveSvg{display:block;width:100%;max-height:270px;cursor:crosshair}
-.curveBox{fill:#111;stroke:#333}
-.curveLine{fill:none;stroke:var(--accent);stroke-width:2.5}
-.curveHandle{stroke:#5a5a5a;stroke-width:1.5}
-.curveDot{cursor:grab;stroke:#111;stroke-width:2}
+.curveBody{display:flex;gap:10px;padding:6px 10px 2px;align-items:stretch}
+#curveSvg{flex:0 0 auto;height:300px;cursor:crosshair}
+.curveBand{stroke:#242424;stroke-width:1}
+.curveGhost{stroke:#3a3a3a;stroke-width:2;stroke-dasharray:3 4}
+.curveLine{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round}
+.curveHandle{stroke:#5f5f5f;stroke-width:1.5}
+.curveDot{cursor:grab;stroke:#141414;stroke-width:2.5}
 .curveDot.a{fill:#e8912d} .curveDot.b{fill:#4a90c4}
 .curveDot:hover{stroke:#fff}
-.curveTick{fill:#6e6e6e;font-size:11px;font-family:var(--mono)}
+.curveEnd{fill:#141414;stroke:#8a8a8a;stroke-width:2}
+.curveTick{fill:#7a7a7a;font-size:11px;font-family:var(--mono)}
+.curveAxis{fill:#5a5a5a;font-size:9px;letter-spacing:.14em}
+
+.curveSide{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:2px}
+.curveLabel{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.curveTrack{position:relative;height:30px;background:var(--well);border:1px solid var(--line2);
+  border-radius:3px;margin-bottom:4px}
+#curveBall{position:absolute;top:7px;width:16px;height:16px;border-radius:50%;
+  background:var(--accent);margin-left:-8px;left:0}
+.curveLib{flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));
+  gap:6px;align-content:start;overflow:auto;min-height:0}
+.libItem{background:var(--panel);border:1px solid var(--line2);border-radius:3px;
+  padding:2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px}
+.libItem:hover{border-color:var(--accent)}
+.libItem svg{width:100%;height:46px}
+.libItem path{fill:none;stroke:#c9c9c9;stroke-width:3}
+.libItem:hover path{stroke:var(--accent)}
+.libItem span{font-size:10.5px;color:var(--dim);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:100%}
 .curveHint{text-align:center;font-size:11px;color:var(--faint);padding-top:2px}
 
 .chip{background:var(--panel);border:1px solid var(--line);color:var(--dim);

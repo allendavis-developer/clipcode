@@ -2,31 +2,45 @@
    THE CURVE EDITOR.
 
    An easing is a shape, and a shape is a mouse job. Put the cursor inside a
-   bezier(...) or curve([...]) and this opens on it: drag, watch the picture
-   change, and the numbers in your code are rewritten as you drag.
+   bezier(...) or curve([...]) — or on a named easing — and this opens on it.
+   Drag, and the numbers in your code are rewritten as you drag.
+
+   Laid out the way cubic-bezier.com is, because that layout is right and the
+   reasons are worth stating:
+
+     TALL, not wide.   All the information in an easing is vertical — how far
+                       along the value is at each moment. A short wide box
+                       throws that resolution away.
+     A LINEAR GHOST.   The grey diagonal is what no easing at all looks like.
+                       You read a curve by how far it departs from that, so
+                       the thing you compare against belongs on the screen.
+     BANDED GRID.      So you can see 0.25, 0.5, 0.75 without a ruler.
+     PRESETS YOU SEE.  A picture of a curve says what "settle" means; the word
+                       does not.
+     A MOVING DOT.     The only true test of an easing is watching something
+                       move, so something moves.
 
    Two modes, because there are two honest ways to describe a curve:
 
-     bezier   exactly two control handles — that is what a cubic bezier IS,
-              and what CSS and every design tool means by an easing curve
+     bezier   exactly two control handles — that is what a cubic bezier IS
      curve    as many points as you like, which the shape passes THROUGH.
-              Click empty space to add one, double-click a point to remove it.
+              Click empty space to add one, right-click one to remove it.
 
-   It edits the code rather than storing anything of its own: the file stays
-   the only source of truth, and what it wrote is right there to keep editing.
+   It edits the code and stores nothing of its own: the file stays the only
+   source of truth, and what it wrote is right there to keep editing.
    ========================================================================== */
 import { draggable } from './drag.js';
 
-/* The drawing box in its own coordinates — it scales to whatever width the
-   pane has, so only this aspect is fixed. */
-const W = 520, H = 300, PADX = 46, PADY = 54;
-const YMIN = -0.75, YMAX = 2.0;          /* room to overshoot, visibly */
+/* graph coordinates. Portrait on purpose — see the note above. */
+const W = 300, H = 360, PADX = 34, PADY = 64;
+const YMIN = -0.55, YMAX = 1.75;         /* room to overshoot and to wind up */
 
 let host = null, onChange = () => {};
-let mode = 'bezier';                     /* 'bezier' | 'curve' */
-let pts = [0.34, 1.56, 0.64, 1];         /* bezier: x1, y1, x2, y2 */
+let mode = 'bezier';
+let pts = [0.34, 1.56, 0.64, 1];
 let pointList = [[0, 0], [0.4, 1.15], [0.7, 0.94], [1, 1]];
 let dragging = false;
+let previewRAF = null;
 
 export const isDragging = () => dragging;
 export const getMode = () => mode;
@@ -38,7 +52,6 @@ const uy = y => YMIN + ((H - PADY - y) / (H - PADY * 2)) * (YMAX - YMIN);
 const r2 = n => Math.round(n * 100) / 100;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
-/* The curves a person actually reaches for, one click each. */
 export const NAMED = {
   linear:    [0, 0, 1, 1],
   easeIn:    [0.55, 0.06, 0.68, 0.19],
@@ -49,35 +62,60 @@ export const NAMED = {
   overshoot: [0.34, 1.56, 0.64, 1]
 };
 
+/* ------------------------------------------------------------------- build -- */
 export function init(handlers = {}) {
   onChange = handlers.onChange || onChange;
   host = document.querySelector('#curve');
   if (!host) return;
+
+  const bands = [0, 0.25, 0.5, 0.75, 1]
+    .map(v => `<line class="curveBand" x1="${PADX}" y1="${py(v)}" x2="${W - PADX}" y2="${py(v)}"/>`)
+    .join('');
+
   host.innerHTML = `
     <div class="curveHead">
       <span id="curveMode">easing</span>
       <span id="curveNums" class="mono"></span>
       <span class="grow"></span>
-      <span id="curvePresets"></span>
       <button id="curveToPoints" class="chip">+ points</button>
       <button id="curveClose" class="btn mini">close</button>
     </div>
-    <svg id="curveSvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-      <rect class="curveBox" x="${PADX}" y="${py(1)}"
-            width="${W - PADX * 2}" height="${py(0) - py(1)}"/>
-      <text class="curveTick" x="${PADX - 8}" y="${py(1) + 4}" text-anchor="end">1</text>
-      <text class="curveTick" x="${PADX - 8}" y="${py(0) + 4}" text-anchor="end">0</text>
-      <text class="curveTick" x="${PADX}" y="${H - 16}" text-anchor="middle">start</text>
-      <text class="curveTick" x="${W - PADX}" y="${H - 16}" text-anchor="middle">end</text>
-      <g id="curveHandles"></g>
-      <path id="curvePath" class="curveLine"/>
-      <g id="curveDots"></g>
-    </svg>
+
+    <div class="curveBody">
+      <svg id="curveSvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+        ${bands}
+        <line class="curveGhost" x1="${px(0)}" y1="${py(0)}" x2="${px(1)}" y2="${py(1)}"/>
+        <text class="curveTick" x="${PADX - 7}" y="${py(1) + 4}" text-anchor="end">1</text>
+        <text class="curveTick" x="${PADX - 7}" y="${py(0) + 4}" text-anchor="end">0</text>
+        <text class="curveAxis" x="${W / 2}" y="${H - 12}" text-anchor="middle">TIME</text>
+        <text class="curveAxis" x="12" y="${H / 2}" text-anchor="middle"
+              transform="rotate(-90 12 ${H / 2})">VALUE</text>
+        <g id="curveHandles"></g>
+        <path id="curvePath" class="curveLine"/>
+        <circle class="curveEnd" cx="${px(0)}" cy="${py(0)}" r="5"/>
+        <circle class="curveEnd" cx="${px(1)}" cy="${py(1)}" r="5"/>
+        <g id="curveDots"></g>
+      </svg>
+
+      <div class="curveSide">
+        <div class="curvePrev">
+          <div class="curveLabel">preview</div>
+          <div class="curveTrack"><div id="curveBall"></div></div>
+        </div>
+        <div class="curveLabel">library</div>
+        <div id="curveLib" class="curveLib"></div>
+      </div>
+    </div>
+
     <div class="curveHint" id="curveHint"></div>`;
 
-  host.querySelector('#curvePresets').innerHTML = Object.keys(NAMED)
-    .map(n => `<button class="chip" data-c="${n}">${n}</button>`).join('');
-  host.querySelectorAll('#curvePresets .chip').forEach(b => {
+  host.querySelector('#curveLib').innerHTML = Object.entries(NAMED)
+    .map(([name, v]) => `
+      <button class="libItem" data-c="${name}" title="${name}">
+        <svg viewBox="0 0 60 60"><path d="${thumb(v)}"/></svg>
+        <span>${name}</span>
+      </button>`).join('');
+  host.querySelectorAll('.libItem').forEach(b => {
     b.onclick = () => {
       mode = 'bezier';
       pts = NAMED[b.dataset.c].slice();
@@ -85,14 +123,21 @@ export function init(handlers = {}) {
       onChange(payload());
     };
   });
+
   host.querySelector('#curveToPoints').onclick = toPoints;
   host.querySelector('#curveClose').onclick = hide;
   bindSurface();
   draw();
+  startPreview();
 }
 
-/* bezier -> a point curve, sampled off the shape you already have, so
-   switching keeps the motion you were just looking at. */
+/* a 60x60 sketch of a curve, for the library buttons */
+function thumb(v) {
+  const X = u => 6 + u * 48, Y = w => 54 - w * 48;
+  return `M ${X(0)} ${Y(0)} C ${X(v[0])} ${Y(v[1])} ${X(v[2])} ${Y(v[3])} ${X(1)} ${Y(1)}`;
+}
+
+/* ------------------------------------------------------------------ modes -- */
 function toPoints() {
   if (mode === 'curve') return;
   const f = sampleBezier();
@@ -120,11 +165,32 @@ function sampleBezier() {
   };
 }
 
+/* the same Catmull-Rom the runtime uses, so the drawing IS the motion */
+function samplePoints() {
+  const p = pointList;
+  const m = p.map((_, i) => {
+    const a = p[Math.max(0, i - 1)], b = p[Math.min(p.length - 1, i + 1)];
+    return b[0] === a[0] ? 0 : (b[1] - a[1]) / (b[0] - a[0]);
+  });
+  return t => {
+    if (t <= 0) return p[0][1];
+    if (t >= 1) return p[p.length - 1][1];
+    let i = 0;
+    while (i < p.length - 2 && t > p[i + 1][0]) i++;
+    const h = p[i + 1][0] - p[i][0];
+    if (h <= 0) return p[i + 1][1];
+    const u = (t - p[i][0]) / h, u2 = u * u, u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * p[i][1] + (u3 - 2 * u2 + u) * h * m[i]
+         + (-2 * u3 + 3 * u2) * p[i + 1][1] + (u3 - u2) * h * m[i + 1];
+  };
+}
+const sampler = () => (mode === 'bezier' ? sampleBezier() : samplePoints());
+
 const payload = () => (mode === 'bezier'
   ? { mode, values: pts.slice() }
   : { mode, points: pointList.map(p => [r2(p[0]), r2(p[1])]) });
 
-/* ------------------------------------------------------------------- input -- */
+/* ------------------------------------------------------------------ input -- */
 function bindSurface() {
   const svg = host.querySelector('#curveSvg');
   const at = (e, box) => ({
@@ -139,8 +205,8 @@ function bindSurface() {
       pts[c.i]     = r2(clamp(ux(q.x), 0, 1));
       pts[c.i + 1] = r2(clamp(uy(q.y), YMIN, YMAX));
     } else {
-      /* the ends stay at the ends — a curve that does not start at the start
-         is not an easing, it is a mystery */
+      /* the ends stay at the ends — an easing that does not start at the
+         start is not an easing, it is a mystery */
       const first = c.i === 0, last = c.i === pointList.length - 1;
       const x = first ? 0 : last ? 1 : clamp(ux(q.x), 0.02, 0.98);
       pointList[c.i] = [r2(x), r2(clamp(uy(q.y), YMIN, YMAX))];
@@ -161,8 +227,7 @@ function bindSurface() {
         const d = Math.hypot(q.x - cx, q.y - cy);
         if (d < best) { best = d; i = k; }
       }
-      /* far from every point, in point mode: that is a new point */
-      if (mode === 'curve' && best > 26) {
+      if (mode === 'curve' && best > 22) {          /* far from all: a new point */
         const nx = r2(clamp(ux(q.x), 0.02, 0.98));
         const ny = r2(clamp(uy(q.y), YMIN, YMAX));
         pointList.push([nx, ny]);
@@ -181,11 +246,10 @@ function bindSurface() {
     }
   });
 
-  /* Right-click a point to remove it — never the two ends.
-
-     Not double-click: a drag has to preventDefault() on pointerdown to stop
-     the browser starting a text selection, and that suppresses the click pair
-     a dblclick is built from. The gesture would simply never arrive. */
+  /* Right-click a point to remove it — never the two ends. Not double-click:
+     a drag must preventDefault() on pointerdown to stop the browser starting a
+     text selection, and that suppresses the click pair a dblclick is built
+     from, so the gesture would simply never arrive. */
   svg.addEventListener('contextmenu', e => {
     e.preventDefault();
     if (mode !== 'curve' || pointList.length <= 2) return;
@@ -196,14 +260,14 @@ function bindSurface() {
       const d = Math.hypot(q.x - px(p[0]), q.y - py(p[1]));
       if (d < best) { best = d; i = k; }
     });
-    if (best > 30 || i <= 0 || i >= pointList.length - 1) return;
+    if (best > 26 || i <= 0 || i >= pointList.length - 1) return;
     pointList.splice(i, 1);
     draw();
     onChange(payload());
   });
 }
 
-/* -------------------------------------------------------------------- draw -- */
+/* ------------------------------------------------------------------- draw -- */
 function draw() {
   if (!host) return;
   const dots = host.querySelector('#curveDots');
@@ -211,7 +275,7 @@ function draw() {
   host.querySelector('#curveMode').textContent = mode === 'bezier' ? 'easing' : 'easing · points';
   host.querySelector('#curveToPoints').classList.toggle('hidden', mode === 'curve');
   host.querySelector('#curveHint').textContent = mode === 'bezier'
-    ? 'drag a handle · above the box overshoots · "+ points" for more control'
+    ? 'drag a handle · grey line is no easing at all · "+ points" for more control'
     : 'drag a point · click empty space to add one · right-click one to remove it';
 
   if (mode === 'bezier') {
@@ -222,19 +286,18 @@ function draw() {
       `<line class="curveHandle" x1="${px(0)}" y1="${py(0)}" x2="${px(x1)}" y2="${py(y1)}"/>`
     + `<line class="curveHandle" x1="${px(1)}" y1="${py(1)}" x2="${px(x2)}" y2="${py(y2)}"/>`;
     dots.innerHTML =
-      `<circle class="curveDot a" cx="${px(x1)}" cy="${py(y1)}" r="9"/>`
-    + `<circle class="curveDot b" cx="${px(x2)}" cy="${py(y2)}" r="9"/>`;
+      `<circle class="curveDot a" cx="${px(x1)}" cy="${py(y1)}" r="10"/>`
+    + `<circle class="curveDot b" cx="${px(x2)}" cy="${py(y2)}" r="10"/>`;
     host.querySelector('#curveNums').textContent = pts.join(', ');
   } else {
     host.querySelector('#curvePath').setAttribute('d', splinePath(pointList));
     handles.innerHTML = '';
     dots.innerHTML = pointList.map(p =>
-      `<circle class="curveDot a" cx="${px(p[0])}" cy="${py(p[1])}" r="8"/>`).join('');
+      `<circle class="curveDot a" cx="${px(p[0])}" cy="${py(p[1])}" r="9"/>`).join('');
     host.querySelector('#curveNums').textContent = `${pointList.length} points`;
   }
 }
 
-/* the same Catmull-Rom the runtime uses, so the drawing IS the motion */
 function splinePath(p) {
   if (p.length < 2) return '';
   const m = p.map((_, i) => {
@@ -251,7 +314,25 @@ function splinePath(p) {
   return d;
 }
 
-/* --------------------------------------------------------------- show/hide -- */
+/* ---------------------------------------------------------------- preview --
+   The only honest test of an easing is watching something move with it, so a
+   dot runs the curve on a loop, with a beat of stillness at each end. */
+function startPreview() {
+  const ball = host.querySelector('#curveBall');
+  if (!ball) return;
+  const RUN = 1000, REST = 450;
+  const step = now => {
+    if (isOpen()) {
+      const cycle = (now % (RUN + REST)) / RUN;
+      const u = cycle >= 1 ? 1 : sampler()(cycle);
+      ball.style.left = (u * 100) + '%';
+    }
+    previewRAF = requestAnimationFrame(step);
+  };
+  if (!previewRAF) previewRAF = requestAnimationFrame(step);
+}
+
+/* -------------------------------------------------------------- show/hide -- */
 export function show(spec) {
   if (!host) return;
   if (spec && spec.points) { mode = 'curve'; pointList = spec.points.map(p => p.slice()); }
