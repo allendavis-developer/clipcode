@@ -34,6 +34,7 @@ export const SIGNATURES = {
   fadeOut:   ['startMs', 'endMs', 'easing'],
   hold:      ['value'],
   bezier:    ['x1', 'y1', 'x2', 'y2'],
+  curve:     ['[[x, y], [x, y], ...]'],
   track:     ['keyframes', 't'],
 
   /* making things */

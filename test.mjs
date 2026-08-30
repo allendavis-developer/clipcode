@@ -52,10 +52,6 @@ const lit = async () => {
   for (let i = 0; i < buf.length; i++) if (buf[i] > 200) n++;
   return n;
 };
-/* A real mouse, not a synthetic MouseEvent. The timeline runs on pointer
-   capture, and dispatchEvent(new MouseEvent(...)) does not produce the pointer
-   events a capture needs — a test that fakes the input stops testing the
-   input. */
 /* Scrub on the RULER, the way you would. Clicking a clip selects it and
    deliberately does not move the playhead, so a test that clicked the track
    was testing selection and calling it a seek.
@@ -80,6 +76,9 @@ await page.goto(B);
 await page.waitForTimeout(800);
 await page.selectOption('#project', P);
 await page.waitForTimeout(900);
+/* Boot opens whichever project comes first, which may be one of yours with a
+   half-written clip in it. Only errors from THIS project are ours to report. */
+errors.length = 0;
 
 /* ---- a new clip is empty ---- */
 await page.click('#btnNewCode');
@@ -153,6 +152,36 @@ ok('delete removes the file', clips().length === before - 1, clips().join(', ') 
 await page.click('#btnNewCode');
 await page.waitForTimeout(1500);
 ok('the name is free again', !clips().some(f => /-2\.js$/.test(f)), clips().join(', '));
+
+/* ---- the curve editor ---- */
+await page.evaluate(() => {
+  const cm = document.querySelector('.CodeMirror').CodeMirror;
+  cm.setValue('duration(2200);\n'
+    + "line('a', 'x', t, { top: 300, size: 150,\n"
+    + '  scale: change(0, 340, .72, 1, bezier(0.34, 1.56, 0.64, 1)) });');
+  cm.setCursor({ line: 2, ch: 44 });
+});
+await page.waitForTimeout(900);
+const curveOpen = await page.evaluate(() =>
+  !document.querySelector('#curve').classList.contains('hidden'));
+ok('curve editor opens on a bezier', curveOpen, await page.textContent('#curveNums'));
+
+await page.click('#curveToPoints');
+await page.waitForTimeout(800);
+const asPoints = await page.evaluate(() =>
+  document.querySelector(".CodeMirror").CodeMirror.getLine(2));
+ok('bezier converts to points', /curve\(\[\[0, 0\]/.test(asPoints) && !/bezier\(curve/.test(asPoints),
+   asPoints.trim().slice(0, 58) + '…');
+
+const svg = await page.locator('#curveSvg').boundingBox();
+await page.mouse.click(svg.x + svg.width * 0.62, svg.y + svg.height * 0.22);
+await page.waitForTimeout(700);
+const added = await page.textContent('#curveNums');
+await page.mouse.click(svg.x + svg.width * 0.62, svg.y + svg.height * 0.22, { button: 'right' });
+await page.waitForTimeout(700);
+const removed = await page.textContent('#curveNums');
+ok('a point can be added', added === '6 points', added);
+ok('a point can be removed', removed === '5 points', removed);
 
 ok('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 

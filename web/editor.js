@@ -360,61 +360,87 @@ async function insertFont(family) {
    dragging rewrites them in place. */
 let curveSpot = null;               /* {line, from, to} of what we are editing */
 
-/* Where the cursor is, and what curve that means. Three cases, because all
-   three are moments you want the editor:
+/* Where the cursor is, and what curve that means. Four cases, because all
+   four are moments you want the editor:
 
-     bezier(.3, 1.5, .6, 1)   edit those numbers
-     bezier()                 empty — open on a default and fill it in
-     overshoot                a named easing: show its shape, and dragging
-                              turns it into an explicit bezier(...)          */
+     bezier(.3, 1.5, .6, 1)      edit those two handles
+     bezier()                    empty — open on a default and fill it in
+     curve([[0,0],[.5,1.2],...]) edit the points
+     overshoot                   a named easing: show its shape, and dragging
+                                 turns it into an explicit bezier(...)       */
 function curveAt(line, ch) {
-  for (const m of line.matchAll(/bezier\s*\(([^)]*)\)/g)) {
-    const open = m.index + m[0].indexOf('(') + 1;
-    const close = m.index + m[0].length - 1;
-    if (ch >= m.index && ch <= close + 1) {
-      const raw = m[1].trim();
-      const nums = raw ? raw.split(',').map(v => Number(v.trim())) : [];
-      const ok = nums.length === 4 && nums.every(n => Number.isFinite(n));
-      return { from: open, to: close, fill: !ok,
-               values: ok ? nums : Curve.NAMED.overshoot.slice() };
-    }
+  /* Two spans matter: the WHOLE call, and just its arguments. Staying in the
+     same kind rewrites the arguments; switching kind rewrites the whole call —
+     replacing only the arguments is how you end up with bezier(curve([...])). */
+  for (const m of line.matchAll(/curve\s*\(\s*\[[\s\S]*?\]\s*\)/g)) {
+    const outerTo = m.index + m[0].length;
+    if (ch < m.index || ch > outerTo) continue;
+    const pts = [...m[0].matchAll(/\[\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]/g)]
+      .map(q => [Number(q[1]), Number(q[2])]);
+    if (pts.length < 2) continue;
+    return { kind: 'curve', points: pts,
+             outerFrom: m.index, outerTo,
+             innerFrom: m.index + m[0].indexOf('['),
+             innerTo: m.index + m[0].lastIndexOf(']') + 1 };
   }
-  for (const m of line.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
+  for (const m of line.matchAll(/bezier\s*\(([^)]*)\)/g)) {
+    const outerTo = m.index + m[0].length;
+    if (ch < m.index || ch > outerTo) continue;
+    const raw = m[1].trim();
+    const nums = raw ? raw.split(',').map(v => Number(v.trim())) : [];
+    const ok = nums.length === 4 && nums.every(n => Number.isFinite(n));
+    return { kind: 'bezier', fill: !ok,
+             values: ok ? nums : Curve.NAMED.overshoot.slice(),
+             outerFrom: m.index, outerTo,
+             innerFrom: m.index + m[0].indexOf('(') + 1,
+             innerTo: outerTo - 1 };
+  }
+  for (const m of line.matchAll(/([A-Za-z_$][\w$]*)/g)) {
     if (!Curve.NAMED[m[1]]) continue;
-    if (ch >= m.index && ch <= m.index + m[0].length)
-      return { from: m.index, to: m.index + m[0].length,
-               values: Curve.NAMED[m[1]].slice(), named: m[1] };
+    const to = m.index + m[0].length;
+    if (ch >= m.index && ch <= to)
+      return { kind: 'named', values: Curve.NAMED[m[1]].slice(),
+               outerFrom: m.index, outerTo: to, innerFrom: m.index, innerTo: to };
   }
   return null;
 }
 
 function syncCurve() {
   if (!cm) return;
-  /* the drag owns the range until it lets go */
-  if (Curve.isDragging()) return;
+  if (Curve.isDragging()) return;        /* the drag owns the range until it lets go */
   const cur = cm.getCursor();
   const found = curveAt(cm.getLine(cur.line) || '', cur.ch);
   if (!found) { curveSpot = null; return Curve.hide(); }
-  curveSpot = { line: cur.line, from: found.from, to: found.to, named: found.named };
-  Curve.show(found.values);
-  /* an empty bezier() gets the default written in, so what the panel shows and
+  curveSpot = { line: cur.line, ...found };
+  Curve.show(found.kind === 'curve' ? { points: found.points } : { values: found.values });
+  /* an empty bezier() gets its default written in, so what the panel shows and
      what the clip runs are the same thing from the first frame */
-  if (found.fill) writeCurve(found.values);
+  if (found.fill) writeCurve({ mode: 'bezier', values: found.values });
 }
 
-function writeCurve(values) {
+/* The panel hands back whichever shape it is editing; this turns that into the
+   exact text the code should now read, and remembers the new spans. */
+function writeCurve(out) {
   if (!cm || !curveSpot) return;
-  /* dragging a NAMED easing replaces the name with the curve it describes */
-  const text = curveSpot.named ? 'bezier(' + values.join(', ') + ')' : values.join(', ');
-  cm.replaceRange(text, { line: curveSpot.line, ch: curveSpot.from },
-                         { line: curveSpot.line, ch: curveSpot.to });
-  if (curveSpot.named) {
-    curveSpot.from += 'bezier('.length;
-    curveSpot.named = null;
-    curveSpot.to = curveSpot.from + values.join(', ').length;
-  } else {
-    curveSpot.to = curveSpot.from + text.length;
-  }
+  const same = out.mode === curveSpot.kind;
+  const inner = out.mode === 'curve'
+    ? '[' + out.points.map(q => `[${q[0]}, ${q[1]}]`).join(', ') + ']'
+    : out.values.join(', ');
+  const call = out.mode === 'curve' ? `curve(${inner})` : `bezier(${inner})`;
+
+  const from = same ? curveSpot.innerFrom : curveSpot.outerFrom;
+  const to   = same ? curveSpot.innerTo   : curveSpot.outerTo;
+  const text = same ? inner : call;
+
+  cm.replaceRange(text, { line: curveSpot.line, ch: from },
+                         { line: curveSpot.line, ch: to });
+
+  curveSpot.kind = out.mode;
+  curveSpot.outerFrom = same ? curveSpot.outerFrom : from;
+  curveSpot.innerFrom = curveSpot.outerFrom + (out.mode === 'curve' ? 6 : 7);
+  curveSpot.innerTo   = curveSpot.innerFrom + inner.length;
+  curveSpot.outerTo   = curveSpot.innerTo + 1;
+
   clearTimeout(idle);
   idle = setTimeout(apply, 200);
 }

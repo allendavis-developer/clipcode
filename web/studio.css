@@ -202,14 +202,20 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .CodeMirror-matchingbracket{color:var(--accent)!important;font-weight:700}
 
 /* the curve editor, docked under the code */
-#curve{flex:0 0 auto;background:#191919;border-top:1px solid var(--line2);padding:0 0 8px}
-.curveHead{display:flex;align-items:center;gap:8px;height:22px;padding:0 9px;
-  font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--line2)}
-.curveHead .mono{color:var(--accent)}
-#curveSvg{display:block;margin:8px auto 2px}
-#curveSvg circle{cursor:grab}
-#curveSvg circle:active{cursor:grabbing}
-.curveHint{text-align:center;font-size:11px;color:var(--faint)}
+/* the curve editor — big enough to aim at, docked under the code */
+#curve{flex:0 0 auto;background:#191919;border-top:1px solid var(--line2);padding:0 0 6px}
+.curveHead{display:flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;
+  font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--line2);flex-wrap:wrap}
+#curveNums{color:var(--accent);margin-left:8px}
+#curveSvg{display:block;width:100%;max-height:270px;cursor:crosshair}
+.curveBox{fill:#111;stroke:#333}
+.curveLine{fill:none;stroke:var(--accent);stroke-width:2.5}
+.curveHandle{stroke:#5a5a5a;stroke-width:1.5}
+.curveDot{cursor:grab;stroke:#111;stroke-width:2}
+.curveDot.a{fill:#e8912d} .curveDot.b{fill:#4a90c4}
+.curveDot:hover{stroke:#fff}
+.curveTick{fill:#6e6e6e;font-size:11px;font-family:var(--mono)}
+.curveHint{text-align:center;font-size:11px;color:var(--faint);padding-top:2px}
 
 .chip{background:var(--panel);border:1px solid var(--line);color:var(--dim);
   border-radius:2px;font-size:10.5px;padding:1px 5px;margin-left:3px;cursor:pointer}

@@ -113,6 +113,47 @@
     };
   }
 
+  /* ---------------------------------------------------------------- curve --
+     An easing through AS MANY POINTS AS YOU LIKE, where bezier() gives you
+     exactly two handles. Pass the points the curve should pass THROUGH:
+
+         y: change(0, 600, -70, 0, curve([[0,0],[0.4,1.15],[0.7,0.92],[1,1]]))
+
+     x is progress 0..1, y is the eased value — above 1 overshoots, below 0
+     winds up first. Between points it is a Catmull-Rom spline, so the shape
+     is smooth and every point is actually hit rather than approached.
+
+     Cached per curve: a clip asks thirty times a second. */
+  function curve(points) {
+    var p = (points || []).slice().sort(function (a, b) { return a[0] - b[0]; });
+    if (p.length < 2) return E.linear;
+    if (p[0][0] > 0) p.unshift([0, p[0][1]]);
+    if (p[p.length - 1][0] < 1) p.push([1, p[p.length - 1][1]]);
+    var cache = {};
+    /* slope at each point, from its neighbours — this is what makes the join
+       between two segments smooth instead of a corner */
+    var m = p.map(function (_, i) {
+      var a = p[Math.max(0, i - 1)], b = p[Math.min(p.length - 1, i + 1)];
+      return b[0] === a[0] ? 0 : (b[1] - a[1]) / (b[0] - a[0]);
+    });
+    return function (t) {
+      if (t <= 0) return p[0][1];
+      if (t >= 1) return p[p.length - 1][1];
+      var key = (t * 1000) | 0;
+      if (cache[key] !== undefined) return cache[key];
+      var i = 0;
+      while (i < p.length - 2 && t > p[i + 1][0]) i++;
+      var x0 = p[i][0], x1 = p[i + 1][0], h = x1 - x0;
+      if (h <= 0) return (cache[key] = p[i + 1][1]);
+      var u = (t - x0) / h, u2 = u * u, u3 = u2 * u;
+      var y = (2*u3 - 3*u2 + 1) * p[i][1]
+            + (u3 - 2*u2 + u) * h * m[i]
+            + (-2*u3 + 3*u2) * p[i + 1][1]
+            + (u3 - u2) * h * m[i + 1];
+      return (cache[key] = y);
+    };
+  }
+
   /* ---------------------------------------------------------------- anim -- */
   /* Canonical property names, with the old short ones kept as aliases so
      nothing already written stops working. Anything not listed falls through
@@ -438,7 +479,7 @@
     return anim(target, t, spec);
   }
 
-  var API = { E:E, track:track, change:change, bezier:bezier,
+  var API = { E:E, track:track, change:change, bezier:bezier, curve:curve,
               fadeIn:fadeIn, fadeOut:fadeOut, hold:hold, anim:anim,
               /* older short names, still supported */
               tween:tween, on:on, off:off, go:go,
