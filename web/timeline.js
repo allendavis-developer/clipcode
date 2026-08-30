@@ -68,7 +68,71 @@ function clipEl(c, trackIndex) {
   el.innerHTML = `<div class="cn">${label}</div>`
     + `<div class="cd">${((c.out - c.in) / 1000).toFixed(2)}s</div>`
     + `<div class="h l"></div><div class="h r"></div>`;
+  if (c.kind === 'audio' || c.kind === 'video') drawWave(el, c);
   return el;
+}
+
+/* -------------------------------------------------------------- waveform --
+   You cut to a voice, so the voice has to be visible. Without this, finding
+   the end of a sentence means replaying the same two seconds and watching a
+   number, which is the actual reason an audio track was a blocker rather than
+   a nicety.
+
+   Peaks come from the server, which caches them beside the file. They are
+   fetched once per source and kept here, because the timeline redraws on every
+   drag and a fetch per redraw would be a fetch per frame. */
+const waves = new Map();          /* src -> peaks, or 'loading', or null */
+
+function drawWave(el, c) {
+  const m = mediaById(c.media);
+  const src = (m && m.src) || c.src;      /* media/<file>, relative to the project */
+  if (!src) return;
+
+  const have = waves.get(src);
+  if (have === undefined) {
+    waves.set(src, 'loading');
+    fetch(`/api/waveform?name=${encodeURIComponent(S.name)}&src=${encodeURIComponent(src)}`)
+      .then(r => r.json())
+      .then(w => { waves.set(src, w && w.ok ? w : null); draw(); })
+      .catch(() => { waves.set(src, null); });
+    return;
+  }
+  if (!have || have === 'loading') return;
+
+  const cv = document.createElement('canvas');
+  cv.className = 'cw';
+  const w = Math.max(6, Math.round(pxOf(c.out - c.in)));
+  const h = 34;
+  /* drawn at device resolution so it is not a soft grey smear on a hidpi screen */
+  const dpr = Math.min(3, devicePixelRatio || 1);
+  cv.width = Math.max(1, Math.round(w * dpr));
+  cv.height = Math.round(h * dpr);
+  cv.style.width = w + 'px';
+  cv.style.height = h + 'px';
+
+  const g = cv.getContext('2d');
+  g.scale(dpr, dpr);
+  g.fillStyle = 'rgba(255,255,255,.34)';
+
+  /* Normalised to the loudest peak in the file. Absolute level says more about
+     how the mic was set than about the take, and a quiet recording should not
+     draw as a flat line. */
+  let top = 0.0001;
+  for (let i = 0; i < have.hi.length; i++)
+    top = Math.max(top, Math.abs(have.hi[i]), Math.abs(have.lo[i]));
+
+  /* the visible span of the source, so a trimmed clip shows its own part */
+  const total = have.durationMs || 1;
+  const from = c.in / total, to = (c.out) / total;
+
+  for (let x = 0; x < w; x++) {
+    const u = from + ((to - from) * x) / w;
+    const b = Math.min(have.hi.length - 1, Math.max(0, Math.round(u * (have.hi.length - 1))));
+    const hi = Math.abs(have.hi[b]) / top, lo = Math.abs(have.lo[b]) / top;
+    const up = Math.max(0.5, (hi * h) / 2), dn = Math.max(0.5, (lo * h) / 2);
+    g.fillRect(x, h / 2 - up, 1, up + dn);
+  }
+  el.appendChild(cv);
 }
 
 export function drawPlayhead() {

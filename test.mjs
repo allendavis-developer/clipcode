@@ -14,7 +14,7 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 const B = process.env.STUDIO || 'http://localhost:4321';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -628,6 +628,9 @@ const RP = '_testrender';
 const rdir = path.join(HERE, 'projects', RP);
 fs.rmSync(rdir, { recursive: true, force: true });
 await api('/api/project/new', 'POST', { name: RP });
+/* the dropdown was built at load; a project made since is not in it yet */
+await page.reload();
+await page.waitForTimeout(1200);
 await page.selectOption('#project', RP);
 await page.waitForTimeout(900);
 await page.click('#btnNewCode');
@@ -667,6 +670,51 @@ if (rendered) {
   } catch (e) { litFrame = -1; }
 }
 ok('and the frames are not black', litFrame > 400, `${litFrame} bright bytes in frame 2`);
+fs.rmSync(mp4, { force: true });
+
+/* ---- and it carries the sound ----
+
+   You cut to a voice, so the voice has to survive the export. The clip is put
+   straight into project.json rather than dragged, because what is being tested
+   is the mux, not the media pool. */
+let hasAudio = false, audioLevel = null;
+try {
+  const wav = path.join(rdir, 'media', 'tone.wav');
+  fs.mkdirSync(path.dirname(wav), { recursive: true });
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi',
+    '-i', 'sine=frequency=440:duration=2', wav], { stdio: 'pipe', timeout: 60000 });
+
+  const pj = path.join(rdir, 'project.json');
+  const proj = JSON.parse(fs.readFileSync(pj, 'utf8'));
+  proj.media = [{ id: 'mtone', kind: 'audio', name: 'tone.wav', src: 'media/tone.wav', dur: 2000 }];
+  proj.tracks[0].clips.push({ id: 'ctone', kind: 'audio', src: 'media/tone.wav',
+                              media: 'mtone', start: 0, in: 0, out: 2000, natural: 2000 });
+  fs.writeFileSync(pj, JSON.stringify(proj));
+
+  execFileSync(process.execPath,
+    [path.join(HERE, 'render.mjs'), RP, mp4, '--scale', '0.25', '--fps', '10'],
+    { stdio: 'pipe', timeout: 180000 });
+
+  const streams = execFileSync('ffprobe', ['-v', 'error', '-show_entries',
+    'stream=codec_type', '-of', 'csv=p=0', mp4], { encoding: 'utf8', timeout: 60000 });
+  hasAudio = /audio/.test(streams);
+
+  /* present is not the same as audible: a silent track would pass the check
+     above and fail the only thing anyone cares about */
+  /* spawnSync, not execFileSync: volumedetect reports on stderr even when the
+     command succeeds, and execFileSync only hands back stderr when it throws. */
+  const probe = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-i', mp4, '-map', '0:a',
+    '-af', 'volumedetect', '-f', 'null', process.platform === 'win32' ? 'NUL' : '/dev/null'],
+    { encoding: 'utf8', timeout: 60000 });
+  const vol = String(probe.stderr || '');
+  const m = /max_volume:\s*(-?[\d.]+) dB/.exec(vol);
+  audioLevel = m ? Number(m[1]) : null;
+} catch (e) {
+  audioLevel = null;
+}
+ok('the export carries the audio', hasAudio, hasAudio ? 'an aac stream is there' : 'no audio stream');
+ok('and the audio is not silence', audioLevel !== null && audioLevel > -60,
+   audioLevel === null ? 'could not measure' : `peaks at ${audioLevel} dB`);
 fs.rmSync(mp4, { force: true });
 fs.rmSync(rdir, { recursive: true, force: true });
 

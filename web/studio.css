@@ -370,3 +370,10 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .list::-webkit-scrollbar-thumb { border-color: var(--panel); }
 #helpList::-webkit-scrollbar-track { background: var(--panel); }
 #helpList::-webkit-scrollbar-thumb { border-color: var(--panel); }
+
+
+/* The waveform sits behind the clip's name, at the bottom of the block, so the
+   label stays readable over it. */
+.clip .cw{position:absolute;left:0;bottom:0;pointer-events:none;opacity:.9}
+.clip.audio{background:#243447;border-color:#3a5573}
+.clip.audio .cn{color:#9fc4ea}

@@ -45,6 +45,7 @@ server.mjs              http routing, and nothing else
     paths.mjs           where things are; safeJoin guards every path from a url
     project.mjs         read/write a project, make clips, the blank clip
     media.mjs           importing and probing media
+    waveform.mjs        peaks for the timeline, cached beside the file
   web/
     index.html          the shell
     studio.css          all of the styling
@@ -275,6 +276,27 @@ needed to *run* the editor, which still has no runtime dependencies at all.
 
 ---
 
+## Sound
+
+Audio imports like anything else, and an audio clip draws its **waveform** on
+the timeline — normalised to its own loudest peak, so a quiet recording is
+still a shape rather than a flat line, and trimmed clips show their own part of
+the file. Peaks come from ffmpeg through `/api/waveform` and are cached beside
+the media, so the second look at a file costs a millisecond.
+
+That is there because you cut to a voice. Without it, finding the end of a
+sentence means replaying the same two seconds and watching a number.
+
+`render.mjs` mixes the audio clips into the export, each trimmed to its own
+in/out and delayed to where it sits on the timeline.
+
+**Only clips of kind `audio`.** Video plays muted in the viewer, so exporting
+its sound would be exporting something you never heard, and the contract of the
+renderer is that the file is what you watched. Unmuting video in the preview,
+and then in the export, is the obvious next step.
+
+---
+
 ## The edit-see loop
 
 Every other cost in this editor is paid once. Waiting to see your change is
@@ -295,7 +317,6 @@ paid on every edit, so it gets its own design:
 
 ## Known gaps
 
-- **No audio track.** Media imports and plays, but there is no waveform.
 - **Cuts only** — no transitions.
 - Placing an element means typing coordinates; dragging it in the viewer and
   having that write back into the code is not built yet.

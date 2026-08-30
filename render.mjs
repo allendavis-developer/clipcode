@@ -29,6 +29,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PROJECTS_DIR = process.env.STUDIO_PROJECTS || path.join(HERE, 'projects');
 const BASE = process.env.STUDIO || 'http://localhost:4321';
 
 /* --------------------------------------------------------------- arguments */
@@ -132,12 +133,32 @@ process.stdout.write(ready ? ' ready\n\n' : ' TIMED OUT — rendering anyway\n\n
 
 fs.mkdirSync(path.dirname(out), { recursive: true });
 
+/* ------------------------------------------------------------------ sound --
+   The audio clips on the timeline, each trimmed to its own in/out and delayed
+   to where it sits. Only clips of kind 'audio': video plays muted in the
+   viewer, so exporting its sound would be exporting something you never heard,
+   and the whole contract of this renderer is that the file is what you
+   watched. */
+const sound = (await (await fetch(BASE + '/api/project?name=' + encodeURIComponent(project))).json());
+const audioClips = ((sound && sound.project && sound.project.tracks) || [])
+  .flatMap(tr => tr.clips || [])
+  .filter(c => c.kind === 'audio')
+  .map(c => {
+    const m = (sound.project.media || []).find(x => x.id === c.media);
+    return m ? { ...c, file: path.join(PROJECTS_DIR, project, m.src) } : null;
+  })
+  .filter(c => c && fs.existsSync(c.file))
+  /* only what falls inside the rendered window */
+  .filter(c => c.start + (c.out - c.in) > from && c.start < to);
+
+const silent = audioClips.length ? out.replace(/\.[^.]+$/, '') + '.silent.mp4' : out;
+
 /* Frames go in over stdin as a png stream, so nothing large is ever written
    to disk unless you ask for it. */
 const args = [
   '-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', '-',
   '-c:v', 'libx264', '-preset', 'medium', '-crf', crf,
-  '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out
+  '-pix_fmt', 'yuv420p', '-movflags', '+faststart', silent
 ];
 const ff = spawn('ffmpeg', args, { stdio: ['pipe', 'ignore', 'pipe'] });
 let ffErr = '';
@@ -182,6 +203,46 @@ if (pageErrors.length) {
 if (code !== 0) {
   console.error('  ffmpeg failed:\n' + ffErr.split('\n').slice(-12).join('\n'));
   process.exit(1);
+}
+
+/* ------------------------------------------------------------------- mux --
+   One input per audio clip, trimmed and delayed onto the timeline, mixed
+   together and laid against the picture. adelay wants milliseconds per
+   channel, and `all=1` applies the one value to every channel so a stereo
+   file does not come out with one side early. */
+if (audioClips.length) {
+  process.stdout.write(`  adding ${audioClips.length} audio clip(s)…`);
+  const inputs = [];
+  const filters = [];
+  audioClips.forEach((c, i) => {
+    inputs.push('-i', c.file);
+    const startS = (c.in / 1000).toFixed(4);
+    const endS = (c.out / 1000).toFixed(4);
+    const delay = Math.max(0, Math.round(c.start - from));
+    filters.push(`[${i + 1}:a]atrim=start=${startS}:end=${endS},`
+               + `asetpts=PTS-STARTPTS,adelay=${delay}:all=1[a${i}]`);
+  });
+  const mix = audioClips.map((_, i) => `[a${i}]`).join('')
+            + `amix=inputs=${audioClips.length}:normalize=0:dropout_transition=0[mix]`;
+
+  const muxArgs = ['-y', '-v', 'error', '-i', silent, ...inputs,
+    '-filter_complex', filters.concat(mix).join(';'),
+    '-map', '0:v', '-map', '[mix]',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+    '-shortest', '-movflags', '+faststart', out];
+
+  const mux = spawn('ffmpeg', muxArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+  let muxErr = '';
+  mux.stderr.on('data', d => { muxErr += d.toString(); });
+  const mcode = await new Promise(r => mux.on('close', r));
+  if (mcode !== 0) {
+    console.error('\n  the audio would not mux, so the picture is here without it:');
+    console.error('  ' + silent);
+    console.error(muxErr.split('\n').slice(-8).join('\n'));
+    process.exit(1);
+  }
+  fs.rmSync(silent, { force: true });
+  process.stdout.write(' done\n');
 }
 
 const size = fs.statSync(out).size;

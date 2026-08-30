@@ -15,6 +15,7 @@ import path from 'path';
 import { PORT, MIME, WEB, PROJECTS, STUDIO, safeJoin } from './lib/paths.mjs';
 import * as P from './lib/project.mjs';
 import * as M from './lib/media.mjs';
+import * as Wave from './lib/waveform.mjs';
 import * as Fonts from './lib/fonts.mjs';
 
 fs.mkdirSync(PROJECTS, { recursive: true });
@@ -280,6 +281,16 @@ const server = http.createServer(async (req, res) => {
       P.write(body.name, { media: [...proj.media, ...r.added] });
     }
     return sendJSON(res, r.ok ? 200 : 400, r);
+  }
+
+  /* The shape of a sound, for drawing on the timeline. Cached beside the file,
+     so the second request for it costs nothing. */
+  if (p === '/api/waveform') {
+    const dir = safeJoin(PROJECTS, url.searchParams.get('name') || '');
+    const file = dir && safeJoin(dir, url.searchParams.get('src') || '');
+    if (!file || !fs.existsSync(file))
+      return sendJSON(res, 404, { ok: false, why: 'no such file' });
+    return sendJSON(res, 200, await Wave.peaks(file));
   }
 
   if (p === '/api/media/upload' && req.method === 'POST') {
