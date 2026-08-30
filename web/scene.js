@@ -148,6 +148,7 @@
 
   /* -------------------------------------------------------------- a node -- */
   function Node(kind, opts) {
+    this.alt = false;                 /* every second child reversed */
     this.kind = kind;                 /* text | image | shape | group | items */
     this.id = idFor(kind);
     this.opts = opts || {};
@@ -187,6 +188,33 @@
    *  ex  text('3361 people').color('#e12392')
    */
   P.color = function (c) { this.css.color = c; return this; };
+
+  /** .italic()   @look
+   *  ex  text('3361 people').font('Fraunces 72pt Black', 268).italic()
+   */
+  P.italic = function () { this.css.fontStyle = 'italic'; return this; };
+
+  /** .weight(n)   @look
+   *  100 to 900. Only has an effect if the family has that weight; most of the
+   *  fonts worth using ship one file per weight, so the family name usually
+   *  carries it instead ('Figtree Black').
+   *  ex  text('a note').weight(700)
+   */
+  P.weight = function (n) { this.css.fontWeight = n; return this; };
+
+  /** .center(y)   @look
+   *  Centres it across the stage, rather than placing its left edge. Give a y
+   *  to set the vertical position at the same time.
+   *  ex  text('3361 people').center(340)
+   */
+  P.center = function (y) {
+    this.css.left = 0;
+    this.css.right = 0;
+    this.css.textAlign = 'center';
+    this.css.justifyContent = 'center';
+    if (y !== undefined) this.css.top = y;
+    return this;
+  };
 
   /** .at(x, y)   @look
    *  Where it sits, in stage pixels from the top-left. This is position, not
@@ -390,6 +418,17 @@
    */
   P.stagger = function (ms) { this.gapMs = ms || 0; return this; };
 
+  /** .alternate()   @group
+   *  Reverses the direction of every second child, so instead of all arriving
+   *  from the same side they cross. It negates x, y and rotation, so it does
+   *  nothing to a move that only changes opacity or scale.
+   *  ex  group(text('3361'), text('people'))
+   *  ex    .stagger(130)
+   *  ex    .alternate()
+   *  ex    .enter(340, { opacity: [0, 1], y: [70, 0], rotation: [-5, 0] });
+   */
+  P.alternate = function (on) { this.alt = on === undefined ? true : !!on; return this; };
+
   /** .animate(property, keyframes, options)   @motion
    *  The escape hatch, for a shape no method above can describe. keyframes is
    *  a list of [timeMs, value] pairs in node-local time, where 0 is when this
@@ -479,11 +518,22 @@
     return M.box(n.id, n.css, parentId);       /* group and items */
   }
 
-  function applyNode(n, t, extraDelay) {
-    var el = elementOf(n);
-    var local = t - n._start - (extraDelay || 0);
-    var spec = {}, i, m, k;
+  /* Reverse the sense of a directional move. Only x, y and rotation have a
+     direction to reverse; scale and opacity do not. */
+  var DIRECTIONAL = { x: 1, y: 1, rotation: 1, rotateX: 1, rotateY: 1 };
+  function flip(spec) {
+    var out = {}, k;
+    for (k in spec) {
+      out[k] = (DIRECTIONAL[k] && spec[k] && spec[k].map)
+        ? spec[k].map(function (f) { return [f[0], -f[1], f[2]]; })
+        : spec[k];
+    }
+    return out;
+  }
 
+  /* Turn a node's declared moves into one spec of tracks in its local time. */
+  function specOfNode(n, el, local) {
+    var spec = {}, i, m, k;
     for (i = 0; i < n.moves.length; i++) {
       m = n.moves[i];
       if (m.raw) {                              /* .animate() */
@@ -494,10 +544,40 @@
       var part = tracks(m.spec, m.at, m.dur);
       for (k in part) spec[k] = spec[k] ? spec[k].concat(part[k].slice(1)) : part[k];
     }
-    if (Object.keys(spec).length) M.anim(el, local, spec);
+    return spec;
+  }
 
-    for (i = 0; i < n.children.length; i++)
-      applyNode(n.children[i], t, (extraDelay || 0) + n._start + i * n.gapMs - n.children[i]._start);
+  /* Where a group's motion lands.
+
+     By default the group moves as ONE THING: a scale grows the whole row about
+     its own centre and the spacing goes with it.
+
+     Given .stagger() or .alternate() there is nothing for that to mean — a
+     cascade is per child by definition — so the same moves are applied to each
+     child instead, delayed down the list. A scale then grows each word about
+     its own centre and the spacing stays put.
+
+     That is the same distinction as line() against block() underneath, decided
+     by whether you asked for a cascade rather than by picking a function. */
+  function applyNode(n, t, extraDelay, reverse) {
+    var el = elementOf(n);
+    var local = t - n._start - (extraDelay || 0);
+    var spec = specOfNode(n, el, local);
+    var perChild = n.children.length && (n.gapMs || n.alt);
+    var i, kid, kidSpec;
+
+    if (!perChild && Object.keys(spec).length)
+      M.anim(el, local, reverse ? flip(spec) : spec);
+
+    for (i = 0; i < n.children.length; i++) {
+      kid = n.children[i];
+      var flipped = n.alt && (i % 2) ? !reverse : reverse;
+      if (perChild && Object.keys(spec).length) {
+        kidSpec = flipped ? flip(spec) : spec;
+        M.anim(elementOf(kid), local - i * n.gapMs, kidSpec);
+      }
+      applyNode(kid, t, (extraDelay || 0) + n._start + i * n.gapMs - kid._start, flipped);
+    }
     return el;
   }
 

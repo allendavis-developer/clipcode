@@ -331,7 +331,7 @@ a.after(b, 10); b.after(a, 10);`);
 ok('a circular timing says so', /refers back to itself/.test(await page.textContent('#codeErr')),
    await page.textContent('#codeErr'));
 
-/* a group lays its children out, and the whole thing animates as one */
+/* a group lays its children out, and with no stagger moves as one */
 await type(`const stat = group(text('11'), text('3361 people'));
 stat.layout('row', { gap: 130 }).size(140).color('#e12392').at(90, 340)
   .enter(340, 'pop');`);
@@ -345,6 +345,35 @@ const kids = await page.evaluate(() => {
 ok('a group lays its children out in a row',
    kids.length === 2 && kids[1].x === kids[0].x + kids[0].w + 130,
    kids.map(k => `${k.t}@${k.x}`).join(' '));
+
+/* A stagger has to actually reach the children. It did not at first: the moves
+   sat on the group, so the delay had nothing to act on and the resolved length
+   was the only thing that knew about it. */
+await type(`group(text('3361'), text('people'))
+  .layout('row', { gap: 130 }).size(140).center(340)
+  .stagger(130).alternate()
+  .enter(340, { opacity: [0, 1], y: [70, 0], ease: 'overshoot' });`);
+const cascade = await page.evaluate(() => {
+  const f = document.querySelector('#stage iframe');
+  f.contentWindow.__render(130, 8);
+  return [...f.contentDocument.querySelectorAll('#stage > * > *')].map(e => ({
+    t: e.textContent, o: Number(getComputedStyle(e).opacity).toFixed(2) }));
+});
+/* At 130ms the first word is most of the way in and the second has not begun,
+   which is what a 130ms stagger means. The first is not at 1.00 — it is 130 of
+   340 through an eased move — so the check is "well under way", not "done". */
+ok('a stagger reaches the children',
+   Number(cascade[0].o) > 0.5 && cascade[1].o === '0.00',
+   `at 130ms: ${cascade.map(c => `${c.t}=${c.o}`).join(' ')}`);
+
+const alt = await page.evaluate(() => {
+  const f = document.querySelector('#stage iframe');
+  f.contentWindow.__render(0, 0);
+  return [...f.contentDocument.querySelectorAll('#stage > * > *')]
+    .map(e => Math.round(new DOMMatrix(getComputedStyle(e).transform).f));
+});
+ok('alternate reverses every second one', alt[0] === 70 && alt[1] === -70,
+   `y offsets ${alt.join(' and ')}`);
 
 /* Render the clip at a chosen time directly. seek() moves the TIMELINE, and by
    this point the project holds more than one clip, so the playhead is not a
