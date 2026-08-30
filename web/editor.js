@@ -460,57 +460,115 @@ function hexNearCursor() {
   return null;
 }
 
+/* A colour under the cursor is replaced; failing that, the one colour in this
+   statement is, wherever in the chain it sits; failing that the hex is simply
+   typed in. Same rule as the font picker: never answer a click with an
+   instruction. */
 function replaceColour(hex) {
   if (!cm || !clip) return;
-  const cur = cm.getCursor(), line = cm.getLine(cur.line) || '';
-  for (const m of line.matchAll(/#[0-9a-fA-F]{6}\b/g)) {
-    if (cur.ch >= m.index - 1 && cur.ch <= m.index + m[0].length + 1) {
-      cm.replaceRange(hex, { line: cur.line, ch: m.index },
-                            { line: cur.line, ch: m.index + m[0].length });
-      clearTimeout(idle); idle = setTimeout(apply, 250);
-      return;
-    }
+  const cur = cm.getCursor();
+  const put = (ln, m) => {
+    cm.replaceRange(hex, { line: ln, ch: m.index },
+                          { line: ln, ch: m.index + m[0].length });
+    clearTimeout(idle); idle = setTimeout(apply, 250);
+  };
+
+  for (const m of (cm.getLine(cur.line) || '').matchAll(/#[0-9a-fA-F]{6}\b/g))
+    if (cur.ch >= m.index - 1 && cur.ch <= m.index + m[0].length + 1) return put(cur.line, m);
+
+  const stmt = statementAround(cur.line);
+  for (let ln = stmt.from; ln <= stmt.to; ln++) {
+    const m = (cm.getLine(ln) || '').match(/#[0-9a-fA-F]{6}\b/);
+    if (m) return put(ln, m);
   }
+
   cm.replaceSelection(`'${hex}'`);
   clearTimeout(idle); idle = setTimeout(apply, 250);
 }
 
+/* The whole statement the cursor is in, not just its line. A scene chain is
+   spread over as many lines as it has methods, so "where am I" has to mean the
+   statement, or picking a font would depend on which line of the chain you
+   happened to be sitting on. */
+function statementAround(line) {
+  const last = cm.lineCount() - 1;
+  const done = n => /;\s*(\/\/.*)?$/.test(cm.getLine(n) || '');
+  const blank = n => !(cm.getLine(n) || '').trim();
+  let from = line;
+  while (from > 0 && !done(from - 1) && !blank(from - 1)) from--;
+  let to = line;
+  while (to < last && !done(to) && !blank(to)) to++;
+  return { from, to };
+}
+
+/* Picking a font should work wherever you are in the thing you are styling,
+   and should never come back with an instruction instead of a font. Five
+   cases, tried in order, and the last one always succeeds. */
 async function insertFont(family) {
   if (!cm || !clip || !family) return;
   /* A font only reliably renders — and only travels with the project — once
      the project carries the file. Picking one copies it in. */
   const r = await api('/api/font/embed', 'POST', { name: S.name, family });
   if (r && r.ok) refreshFonts();
-  /* A font name is only meaningful inside an options object, so put it in one
-     rather than wherever the cursor happens to be — dropping `font: 'X'` in
-     front of a statement makes a syntax error out of a mouse click. */
-  const cur = cm.getCursor();
-  const line = cm.getLine(cur.line) || '';
 
-  const existing = line.match(/font:\s*'[^']*'/);
-  if (existing) {
-    cm.replaceRange(`font: '${family}'`,
-      { line: cur.line, ch: existing.index },
-      { line: cur.line, ch: existing.index + existing[0].length });
+  const cur = cm.getCursor();
+  const stmt = statementAround(cur.line);
+  const swap = (ln, m, text) => {
+    cm.replaceRange(text, { line: ln, ch: m.index },
+                          { line: ln, ch: m.index + m[0].length });
+    cm.focus();
+    clearTimeout(idle); idle = setTimeout(apply, 250);
+  };
+
+  /* 1. a .font('Old') or .font('Old', 268) already here — swap the family and
+        keep the size, which is the common case once a clip is under way */
+  for (let ln = stmt.from; ln <= stmt.to; ln++) {
+    const m = (cm.getLine(ln) || '').match(/\.font\(\s*'[^']*'/);
+    if (m) return swap(ln, m, `.font('${family}'`);
+  }
+
+  /* 2. the same thing written as an option: font: 'Old' */
+  for (let ln = stmt.from; ln <= stmt.to; ln++) {
+    const m = (cm.getLine(ln) || '').match(/font:\s*'[^']*'/);
+    if (m) return swap(ln, m, `font: '${family}'`);
+  }
+
+  /* 3. a scene chain with no font yet — add one as its own line, indented to
+        match the methods around it */
+  let chain = '';
+  for (let ln = stmt.from; ln <= stmt.to; ln++) chain += (cm.getLine(ln) || '') + '\n';
+  if (/\b(text|group|items|image|shape)\s*\(/.test(chain)) {
+    const after = cm.getLine(cur.line) || '';
+    const next = cm.getLine(cur.line + 1) || '';
+    const dotted = /^(\s*)\./.exec(next) || /^(\s*)\./.exec(after);
+    const pad = dotted ? dotted[1] : (after.match(/^\s*/) || [''])[0] + '  ';
+    cm.replaceRange(`\n${pad}.font('${family}')`,
+                    { line: cur.line, ch: after.length });
     cm.focus();
     clearTimeout(idle); idle = setTimeout(apply, 250);
     return;
   }
 
-  /* the nearest options object: this line's `{`, else scan up a few lines */
+  /* 4. an options object: this line's `{`, else a few lines up */
   let ln = cur.line, at = -1;
   for (let i = 0; i < 6 && ln - i >= 0; i++) {
     const l = cm.getLine(ln - i) || '';
     const brace = l.lastIndexOf('{');
     if (brace >= 0) { ln = ln - i; at = brace + 1; break; }
   }
-  if (at < 0) {
-    showError(`Put the cursor inside a line(...) or block(...) call, then pick a font.`);
+  if (at >= 0) {
+    const rest = (cm.getLine(ln) || '').slice(at);
+    const sep = rest.trim().startsWith('}') || rest.trim() === '' ? '' : ' ';
+    cm.replaceRange(` font: '${family}',${sep}`, { line: ln, ch: at }, { line: ln, ch: at });
+    cm.focus();
+    clearTimeout(idle); idle = setTimeout(apply, 250);
     return;
   }
-  const rest = (cm.getLine(ln) || '').slice(at);
-  const sep = rest.trim().startsWith('}') || rest.trim() === '' ? '' : ' ';
-  cm.replaceRange(` font: '${family}',${sep}`, { line: ln, ch: at }, { line: ln, ch: at });
+
+  /* 5. nowhere obvious to put it. Give the name, quoted and spelled exactly —
+        the reason to reach for this picker is that the name is fiddly, and
+        refusing to hand it over helps nobody. */
+  cm.replaceSelection(`'${family}'`);
   cm.focus();
   clearTimeout(idle); idle = setTimeout(apply, 250);
 }

@@ -452,6 +452,50 @@ ok('F1 works while typing code',
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 
+/* ---- the pickers ----
+
+   The font picker used to only understand line() and block(), so anywhere in a
+   scene chain it answered a click with "put the cursor inside a line(...) or
+   block(...)". A picker exists because the name is fiddly to type; refusing to
+   hand it over is the one thing it must never do. */
+const family = await page.evaluate(() => {
+  const o = [...document.querySelectorAll('#pickFont option')].find(o => o.value);
+  return o ? o.value : null;
+});
+const putCursor = async (code, line, ch) => {
+  await type(code);
+  await page.evaluate(a =>
+    document.querySelector('.CodeMirror').CodeMirror.setCursor({ line: a.l, ch: a.ch }),
+    { l: line, ch });
+  await page.waitForTimeout(200);
+};
+const pickFont = async () => {
+  await page.selectOption('#pickFont', family);
+  await page.waitForTimeout(1400);
+  return page.evaluate(() => document.querySelector('.CodeMirror').CodeMirror.getValue());
+};
+
+await putCursor(`group(text('3361'), text('people'))\n  .layout('row', { gap: 130 })\n  .color('#ffb02e')\n  .center(340);`, 2, 8);
+let picked = await pickFont();
+ok('the font picker works in a scene chain',
+   picked.includes(`.font('${family}')`) && !/put the cursor/i.test(await page.textContent('#codeErr')),
+   picked.split('\n').find(l => l.includes('.font')) || 'nothing inserted');
+
+await putCursor(`text('hi')\n  .font('Arial', 268)\n  .center(340);`, 2, 5);
+picked = await pickFont();
+ok('and swapping a font keeps the size', picked.includes(`.font('${family}', 268)`),
+   picked.split('\n').find(l => l.includes('.font')) || '');
+
+await putCursor(`line('l1', 'hi', t, {\n  top: 340, size: 268\n});`, 1, 10);
+picked = await pickFont();
+ok('it still works in an options object', picked.includes(`font: '${family}'`),
+   picked.split('\n')[0]);
+
+await putCursor('', 0, 0);
+picked = await pickFont();
+ok('and with nowhere to put it, it gives you the name',
+   picked.trim() === `'${family}'`, JSON.stringify(picked.trim()));
+
 /* ---- the layout is yours and it stays ---- */
 const paneVars = () => page.evaluate(() => {
   const s = getComputedStyle(document.documentElement);
