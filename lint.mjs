@@ -88,14 +88,37 @@ function checkDocs() {
     fail('web/motion.js', `documented but not exported: ${stale.join(', ')}`);
 }
 
+/* The scene layer is documented the same way and the same rule applies: a
+   chainable method with no doc block is invisible in F1, which is worse than
+   undocumented because it looks as though it does not exist. */
+function checkScene() {
+  const src = fs.readFileSync(path.join(HERE, 'web/scene.js'), 'utf8');
+
+  const methods = [...src.matchAll(/^  P(?:\.|\[')([\w$]+)/gm)].map(m => m[1]);
+  const api = /var API = \{([\s\S]*?)\};/.exec(src);
+  const made = api ? [...api[1].matchAll(/([A-Za-z_$][\w$]*)\s*:/g)].map(m => m[1]) : [];
+
+  const documented = new Set(
+    (src.match(/\/\*\*[^\n]*/g) || [])
+      .map(l => (/\/\*\*\s+\.?([\w$]+)/.exec(l) || [])[1])
+      .filter(Boolean));
+
+  /* internals: _add is the shared builder, and the three readers are how the
+     resolver asks a node about itself. None of them are yours to call. */
+  const skip = new Set(['_add', 'length', 'startsAt', 'endsAt']);
+  const missing = [...methods, ...made].filter(n => !documented.has(n) && !skip.has(n));
+  if (missing.length) fail('web/scene.js', `not documented: ${missing.join(', ')}`);
+}
+
 console.log('\nSTUDIO — source hygiene\n');
 walk(HERE);
 checkDocs();
+checkScene();
 
 /* and it must actually parse */
 for (const f of ['server.mjs', 'lib/paths.mjs', 'lib/project.mjs', 'lib/media.mjs',
                  'lib/fonts.mjs', 'web/motion.js', 'web/app.js', 'web/editor.js',
-                 'web/curve.js', 'web/stage.js', 'web/transport.js', 'web/drag.js',
+                 'web/curve.js', 'web/scene.js', 'web/stage.js', 'web/transport.js', 'web/drag.js',
                  'web/timeline.js', 'web/pool.js', 'web/state.js', 'web/signatures.js']) {
   const full = path.join(HERE, f);
   if (!fs.existsSync(full)) continue;

@@ -79,6 +79,7 @@ ${faces || ''}
 </style>
 <div id="stage"></div>
 <script src="/web/motion.js"></script>
+<script src="/web/scene.js"></script>
 <script>
 /* Installed BEFORE the clip's own script. A syntax error is thrown while that
    script is being PARSED, so a handler placed after it is never reached — which
@@ -93,7 +94,9 @@ window.onerror = function (msg, file, line, col) {
 <script>
 window.__stageW = ${w}; window.__stageH = ${h};
 var __dur = 3000;
-function duration(ms){ __dur = ms; window.__duration = ms; }
+/* Optional now. A clip that never calls it is as long as its choreography,
+   which the scene layer works out and reports at the end of the frame. */
+function duration(ms){ __dur = ms; window.__duration = ms; window.__durationSet = true; }
 function css(text){
   if (document.getElementById('__css')) return;
   var s = document.createElement('style'); s.id = '__css'; s.textContent = text;
@@ -103,7 +106,9 @@ function html(markup){
   var st = document.getElementById('stage');
   if (st.__html !== markup) { st.__html = markup; st.insertAdjacentHTML('beforeend', markup); }
 }
-window.__render = function (t, frame) {`;
+window.__render = function (t, frame) {
+if (window.__sceneBegin) window.__sceneBegin();
+try {`;
 
   /* head's LAST line is the `window.__render = ...` line above. The clip's
      first line is the one after it, so a reported line R is your line
@@ -112,6 +117,7 @@ window.__render = function (t, frame) {`;
 
   return head.replace('__OFFSET__', String(offset)) + `
 ${js}
+} finally { if (window.__sceneEnd) window.__sceneEnd(t); }
 };
 window.__duration = __dur;
 
@@ -162,6 +168,7 @@ function tail(offset) {
 /* the old format: a whole html page, used exactly as written */
 function inject(htmlSrc) {
   return `<script src="/web/motion.js"></script>
+<script src="/web/scene.js"></script>
 ` + htmlSrc + tail(0);
 }
 

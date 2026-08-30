@@ -18,17 +18,31 @@
    ========================================================================== */
 import { $ } from './state.js';
 
-const GROUPS = [
-  ['start',  'Start here'],
-  ['type',   'Text on screen'],
-  ['track',  'Making a number move'],
-  ['move',   'Animating'],
-  ['make',   'Making elements'],
-  ['draw',   'Drawing'],
-  ['place',  'Placement'],
-  ['math',   'Small maths'],
-  ['easing', 'Easings'],
-  ['option', 'Options']
+/* Two files, two layers, and the panel says so. The scene layer is what you
+   should reach for; motion.js is underneath it for the things it cannot say.
+   Group names are scoped to their file, so both layers can have a "make"
+   without colliding. */
+const SECTIONS = [
+  { file: '/web/scene.js', title: 'Writing a clip', groups: [
+      ['start',  'Start here'],
+      ['make',   'Making things'],
+      ['look',   'How it looks'],
+      ['motion', 'Motion'],
+      ['time',   'Timing'],
+      ['group',  'Groups and repetition']
+  ] },
+  { file: '/web/motion.js', title: 'Underneath', groups: [
+      ['start',  'The model'],
+      ['type',   'Text on screen'],
+      ['track',  'Making a number move'],
+      ['move',   'Animating'],
+      ['make',   'Making elements'],
+      ['draw',   'Drawing'],
+      ['place',  'Placement'],
+      ['math',   'Small maths'],
+      ['easing', 'Easings'],
+      ['option', 'Options']
+  ] }
 ];
 
 let host = null, entries = [], insertAt = () => {};
@@ -51,7 +65,7 @@ export function parse(source) {
     const tag = /@(\w+)\s*$/.exec(head);
     const sig = head.replace(/\s*@\w+\s*$/, '').trim();
     if (!sig) continue;
-    const name = (/^([\w$]+)/.exec(sig) || [, sig])[1];
+    const name = (/^\.?([\w$]+)/.exec(sig) || [, sig])[1];
 
     /* An example line is "ex" followed by two spaces, or "ex" alone for a
        blank line inside an example. Indentation after those two spaces is
@@ -75,10 +89,13 @@ export async function init(handlers = {}) {
   host = $('#help');
   if (!host) return;
 
-  try {
-    const src = await fetch('/web/motion.js').then(r => r.text());
-    entries = parse(src);
-  } catch { entries = []; }
+  entries = [];
+  for (let i = 0; i < SECTIONS.length; i++) {
+    try {
+      const src = await fetch(SECTIONS[i].file).then(r => r.text());
+      for (const e of parse(src)) entries.push({ ...e, section: i });
+    } catch { /* a layer that will not load should not empty the panel */ }
+  }
 
   host.innerHTML = `
     <div class="helpBox">
@@ -115,15 +132,22 @@ function render(q) {
 
   const shown = entries.filter(hit);
   const nav = [], cards = [];
+  const seen = new Set();
 
-  for (const [key, title] of GROUPS) {
-    const mine = shown.filter(e => e.group === key);
-    if (!mine.length) continue;
-    nav.push(`<a href="#hg-${key}">${title}</a>`);
-    cards.push(`<h3 id="hg-${key}">${title}</h3>`);
-    for (const e of mine) cards.push(card(e));
-  }
-  const rest = shown.filter(e => !GROUPS.some(g => g[0] === e.group));
+  SECTIONS.forEach((sec, i) => {
+    const here = shown.filter(e => e.section === i);
+    if (!here.length) return;
+    nav.push(`<div class="helpSec">${sec.title}</div>`);
+    for (const [key, title] of sec.groups) {
+      const mine = here.filter(e => e.group === key);
+      if (!mine.length) continue;
+      const id = `hg-${i}-${key}`;
+      nav.push(`<a href="#${id}">${title}</a>`);
+      cards.push(`<h3 id="${id}">${title}</h3>`);
+      for (const e of mine) { cards.push(card(e)); seen.add(e); }
+    }
+  });
+  const rest = shown.filter(e => !seen.has(e));
   if (rest.length) {
     nav.push('<a href="#hg-other">Everything else</a>');
     cards.push('<h3 id="hg-other">Everything else</h3>');

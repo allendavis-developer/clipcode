@@ -276,6 +276,92 @@ await page.waitForTimeout(250);
 ok('matching sets that length', (await page.textContent('#curveDurVal')) === '0.34s',
    await page.textContent('#curveDurVal'));
 
+/* ---- the scene layer ----
+
+   The claim being tested is the one the layer exists for: that timing written
+   as a relationship survives an edit. Change the length of the first thing and
+   everything behind it must move with it, still the same gap behind. */
+const plan = () => page.evaluate(() => {
+  const w = document.querySelector('#stage iframe').contentWindow;
+  w.__render(0, 0);
+  return w.__scenePlan();
+});
+const CHOREO = ms => `const title    = text('Title').at(90, 200).size(120);
+const subtitle = text('Subtitle').at(90, 380).size(70);
+const chart    = text('Chart').at(90, 520).size(70);
+
+title.enter(${ms});
+subtitle.enter(250).after(title, 80);
+chart.enter(600).after(subtitle, -120);`;
+
+await type(CHOREO(300));
+let p1 = await plan();
+ok('relative timing resolves',
+   p1[0].start === 0 && p1[1].start === 380 && p1[2].start === 510,
+   p1.map(n => `${n.text}@${n.start}`).join(' '));
+
+await type(CHOREO(500));
+let p2 = await plan();
+ok('and it survives an edit',
+   p2[1].start === 580 && p2[2].start === 710,
+   `title 300->500 moved subtitle ${p1[1].start}->${p2[1].start}, `
+   + `chart ${p1[2].start}->${p2[2].start}`);
+ok('the gaps are what was preserved',
+   p2[1].start - p2[0].end === 80 && p2[2].start - p2[1].end === -120,
+   `+80 and -120 either side`);
+/* the clip's OWN length, not #len, which is the whole timeline */
+const clipLen = () => page.evaluate(() => {
+  const el = [...document.querySelectorAll('.clip')].pop();
+  return el ? el.querySelector('.cd').textContent : null;
+});
+ok('the clip length follows the choreography', (await clipLen()) === '1.31s',
+   `${await clipLen()} for a 1310ms choreography`);
+
+await type(`const a = text('A').at(90,100).size(60).enter(300).start(400);
+const b = text('B').at(90,200).size(60).enter(200).with(a);
+const c = text('C').at(90,300).size(60).enter(400).before(a, 100);
+const d = text('D').at(90,400).size(60).enter(150).alignEnd(a);`);
+const p3 = await plan();
+ok('with, before and alignEnd', p3[1].start === 400 && p3[2].start === 300 && p3[3].end === 700,
+   p3.map(n => `${n.text} ${n.start}-${n.end}`).join('  '));
+
+await type(`const a = text('A').at(90,100).size(60).enter(300);
+const b = text('B').at(90,200).size(60).enter(200);
+a.after(b, 10); b.after(a, 10);`);
+ok('a circular timing says so', /refers back to itself/.test(await page.textContent('#codeErr')),
+   await page.textContent('#codeErr'));
+
+/* a group lays its children out, and the whole thing animates as one */
+await type(`const stat = group(text('11'), text('3361 people'));
+stat.layout('row', { gap: 130 }).size(140).color('#e12392').at(90, 340)
+  .enter(340, 'pop');`);
+const kids = await page.evaluate(() => {
+  const d = document.querySelector('#stage iframe').contentDocument;
+  document.querySelector('#stage iframe').contentWindow.__render(600, 36);
+  return [...d.querySelectorAll('#stage > * > *')]
+    .map(e => ({ t: e.textContent, x: Math.round(e.getBoundingClientRect().left),
+                 w: Math.round(e.getBoundingClientRect().width) }));
+});
+ok('a group lays its children out in a row',
+   kids.length === 2 && kids[1].x === kids[0].x + kids[0].w + 130,
+   kids.map(k => `${k.t}@${k.x}`).join(' '));
+
+/* Render the clip at a chosen time directly. seek() moves the TIMELINE, and by
+   this point the project holds more than one clip, so the playhead is not a
+   reliable way to ask this clip what it looks like at 400ms. */
+const renderAt = async ms => {
+  await page.evaluate(t => {
+    const f = document.querySelector('#stage iframe');
+    f.contentWindow.__render(t, Math.round(t / 1000 * 60));
+  }, ms);
+  await page.waitForTimeout(150);
+  return lit();
+};
+const sceneDark = await renderAt(0);
+const sceneLit = await renderAt(400);
+ok('and the group is on the picture', sceneLit > sceneDark * 2,
+   `${sceneDark} lit at 0ms -> ${sceneLit} at 400ms`);
+
 /* ---- the reference ----
 
    Its content comes out of the doc comments in motion.js, so these checks are

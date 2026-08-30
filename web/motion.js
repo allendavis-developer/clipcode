@@ -44,53 +44,28 @@
 
 
 
-  /** How a clip works   @start
-   *  A clip is code that runs once per frame. It is given one variable, t,
-   *  which is the number of milliseconds since the clip started.
-   *
-   *  The code does not advance time and does not wait. Its job is to answer
-   *  a single question: at time t, what does the frame look like? The editor
-   *  calls it again with a different t for the next frame.
-   *
-   *  There is therefore no play, no wait, and no then. Values are described
-   *  across a span of time, and the editor asks for whichever moment it
-   *  needs to draw.
-   *  ex  duration(2200);
-   *  ex
-   *  ex  line('l1', '3361 people', t, { top: 340, size: 268 });
-   */
 
-  /** How to write a move   @start
-   *  Animated values all use the same form:
+
+
+  /** Tracks, and the model underneath   @start
+   *  Everything in this layer works in absolute milliseconds, and every
+   *  animated value is a track: a list of times and values, read at t.
    *
    *      property: change(startMs, endMs, from, to, easing)
    *
-   *  For example, scale: change(0, 340, 0.72, 1, overshoot) means the scale
-   *  is 0.72 until 0ms, moves to 1 between 0ms and 340ms following the
-   *  overshoot easing, and stays at 1 afterwards.
+   *  For example, scale: change(0, 340, 0.72, 1, overshoot) holds 0.72
+   *  until 0ms, moves to 1 by 340ms following the overshoot easing, and
+   *  holds 1 afterwards.
    *
-   *  The value outside the given range is held, not reset. Several
-   *  properties can be animated in the same options list.
+   *  The scene layer is built on this, and turns relationships between
+   *  objects into these numbers for you. Reach for this layer when you
+   *  need something the scene layer cannot say.
    *  ex  line('l1', 'example text', t, {
    *  ex    top: 340, size: 268,
    *  ex    opacity: fadeIn(0, 340),
    *  ex    scale: change(0, 340, 0.72, 1, overshoot),
    *  ex    y: change(0, 340, -70, 0, overshoot)
    *  ex  });
-   */
-
-  /** Rendering must be repeatable   @start
-   *  The same t must always produce the same frame.
-   *
-   *  Do not use setTimeout, CSS transitions, Math.random, or any value that
-   *  accumulates between calls. If a frame depends on the frames drawn
-   *  before it, scrubbing backwards will not match scrubbing forwards, and
-   *  an export will match neither. Playback still looks correct while this
-   *  is broken, so it is difficult to notice.
-   *
-   *  For values that should look random, use rnd(i), which returns the same
-   *  number for the same i.
-   *  ex  rotation: hold(-6 + rnd(i) * 12)
    */
 
   /** Easings   @easing
@@ -328,7 +303,9 @@
                     rotation:1, rotateX:1, rotateY:1 };
   var FILTER    = { blur:1, brightness:1, saturation:1 };
   var PX        = { top:1, left:1, right:1, bottom:1, width:1, height:1,
-                    fontSize:1, letterSpacing:1, borderRadius:1, borderWidth:1 };
+                    fontSize:1, letterSpacing:1, borderRadius:1, borderWidth:1,
+                    gap:1, rowGap:1, columnGap:1, padding:1, margin:1,
+                    minWidth:1, minHeight:1, maxWidth:1, maxHeight:1 };
   var el = function (e) { return typeof e === 'string' ? D.getElementById(e) : e; };
 
   /** anim(element, t, spec)   @move
@@ -478,6 +455,9 @@
     var key = JSON.stringify(css);
     if (n.__css !== key) {
       n.__css = key;
+      /* Absolute is the default because a clip places things on a stage. It is
+         only a default: a style that names its own position wins, which is
+         what lets a group lay its children out in flow. */
       n.style.position = 'absolute';
       for (var k in css) if (css.hasOwnProperty(k)) {
         var v = css[k];
@@ -645,6 +625,8 @@
                 font:1, italic:1, weight:1, align:1, tracking:1, leading:1,
                 shadow:1, background:1, zIndex:1 };
   var TIMING = { gap:1, from:1, alt:1, each:1, parent:1 };
+
+
 
 
 

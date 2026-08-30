@@ -15,6 +15,11 @@ const layers = new Map();      /* clip.id -> {el, kind, src, ready} */
 let onError = () => {};
 export const setErrorSink = fn => { onError = fn; };
 
+/* A clip written in the scene layer works its own length out from its
+   choreography, and only knows it once it has run. */
+let onDuration = () => {};
+export const setDurationSink = fn => { onDuration = fn; };
+
 /* A clip that throws shows nothing, and nothing is the least informative
    thing a screen can do. Say so on the picture itself — the code pane's
    strip is easy to miss when you are looking at the viewer. */
@@ -83,6 +88,10 @@ addEventListener('message', ev => {
          Without this the picture only appears once something else moves the
          playhead — which at a standstill means never. */
       invalidate();
+    }
+    if (d.studio === 'duration' && d.duration > 0 && L.natural !== d.duration) {
+      L.natural = d.duration;
+      onDuration(id, d.duration);
     }
     if (d.studio === 'error')
       fail(id, `line ${d.line}: ${d.message}`, { line: d.line, col: d.col || 0 });

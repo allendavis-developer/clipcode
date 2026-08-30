@@ -140,19 +140,29 @@ Editor.init({
      in both directions; a trimmed clip keeps its trim and is only pulled back
      if it now runs past the end. */
   onApplied: (clip, declared) => {
-    const found = clipById(clip.id);
-    if (found && declared) {
-      const c = found.clip;
-      const untrimmed = c.in === 0 && c.out === c.natural;
-      c.natural = declared;
-      if (untrimmed || c.out > declared) c.out = declared;
-      save();
-      TL.draw();
-    }
+    if (declared) applyDuration(clip.id, declared);
     Stage.reloadClip(clip.id);
     Stage.invalidate();
   }
 });
+
+/* A clip's length comes from one of two places, and they are the same rule:
+   duration(ms) when the clip states it, and the end of the choreography when
+   it does not. Either way the timeline follows, and a clip you have trimmed by
+   hand keeps its trim unless it would now run past the end. */
+function applyDuration(id, ms) {
+  const found = clipById(id);
+  if (!found || !ms) return;
+  const c = found.clip;
+  if (c.natural === ms) return;
+  const untrimmed = c.in === 0 && c.out === c.natural;
+  c.natural = ms;
+  if (untrimmed || c.out > ms) c.out = ms;
+  save();
+  TL.draw();
+}
+
+Stage.setDurationSink(applyDuration);
 
 /* An error inside a clip belongs in the pane where you can fix it — but only
    for the clip you are actually looking at. */

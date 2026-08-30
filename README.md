@@ -54,11 +54,12 @@ server.mjs              http routing, and nothing else
     timeline.js         arranging clips with a mouse
     transport.js        the clock, the playhead, the keyboard
     editor.js           the code pane and a clip's source
-    help.js             the F1 reference, parsed out of motion.js
+    scene.js            the chained, choreography-first layer clips are written in
+    help.js             the F1 reference, parsed out of scene.js and motion.js
     curve.js            the easing editor
     drag.js             the one drag primitive
     pool.js             media, and getting it into the project
-    motion.js           the editing library, injected into every clip
+    motion.js           the lower level scene.js is built on
     presets.js          built-in moves
 projects/<name>/        one folder per video — see below
 presets.json            moves you saved
@@ -112,11 +113,83 @@ work untouched and are served as written.
 
 ---
 
-## The editing library
+## Writing a clip
 
-In `web/motion.js`, injected into every clip. This is where the speed comes
-from: in a node editor the cost of a move is proportional to the number of
-things it moves, and here it is flat.
+A clip is code that runs once per frame. It gets one variable, `t` — the
+milliseconds since the clip started — and answers one question: at time `t`,
+what does the frame look like?
+
+There are two layers, and you should reach for the first.
+
+### The scene layer — `web/scene.js`
+
+Things are made, described and choreographed in one chained sentence:
+
+```js
+text('3361 people')
+  .font('Figtree Black', 268)
+  .color('#e12392')
+  .at(90, 340)
+  .enter(340, 'pop');
+```
+
+**Timing is relationships, not timestamps.** This is the part that matters:
+
+```js
+title.enter(300);
+subtitle.enter(250).after(title, 80);
+chart.draw(600).after(subtitle, -120);
+```
+
+`.after(other, gap)`, `.with(other)`, `.before(other, gap)`, `.alignEnd(other)`
+and `.during(other)`; a negative gap overlaps. A clip is therefore a
+**dependency graph**, resolved to a timeline on every frame, not a set of
+objects with fixed timestamps on them.
+
+Change the title from 300ms to 500ms and the subtitle moves from 380 to 580 and
+the chart from 510 to 710 — still 80ms behind and still overlapping by 120 —
+because the gap is what was written down and the absolute time was only ever a
+consequence of it. That is one edit instead of repairing every number after it.
+
+`window.__scenePlan()` returns the resolved timeline, so what the relationships
+came to is inspectable rather than implied.
+
+**A clip is as long as its choreography.** `duration(ms)` is optional now; with
+no call to it, the clip on the timeline ends when the last thing does, and
+follows when you change a timing. Call it when you want to hold past the end.
+
+**Elements have no ids.** `text('hello')` is enough, because the clip re-runs
+from the top every frame and the *order* of the calls is a stable identity. The
+rule that comes with it: create unconditionally, animate conditionally. A
+create inside an `if` changes what everything after it refers to.
+
+| | |
+|---|---|
+| `text() image() shape()` | make one thing |
+| `group(a, b) items([...]) sequence(a, b, c)` | make several |
+| `.font() .size() .color() .at() .style() .layout()` | how it looks |
+| `.enter() .exit() .hold() .move() .fade() .scale() .rotate() .draw()` | what it does |
+| `.start() .after() .with() .before() .alignEnd() .during()` | when it does it |
+| `.stagger()` | children cascade instead of arriving together |
+| `.animate(prop, keyframes)` | the escape hatch |
+
+Entrance presets: `fade pop rise drop slide grow spin`. Three levels of detail,
+and you should rarely need the third:
+
+```js
+title.enter(300, 'pop');
+title.enter(300, { opacity: [0, 1], scale: [.8, 1], ease: 'overshoot' });
+title.animate('scale', [[0, .8], [220, 1.08], [300, 1]]);
+```
+
+### The editing library
+
+In `web/motion.js`, underneath the scene layer and injected into every clip.
+Absolute milliseconds and explicit ids. Reach for it when the scene layer
+cannot say what you mean; the two mix freely in one clip.
+
+This is where the speed comes from: in a node editor the cost of a move is
+proportional to the number of things it moves, and here it is flat.
 
 | | |
 |---|---|
@@ -178,8 +251,9 @@ Press **F1** (or the Help button, or `?`) for the reference. Search it, and
 click any example to insert it at the cursor.
 
 Nothing in that panel is written twice. Every entry is a doc comment sitting
-directly above the function it describes in `web/motion.js`; `web/help.js`
-fetches that file and parses them out. Changing a function's arguments puts its
+directly above the function it describes in `web/scene.js` or `web/motion.js`;
+`web/help.js` fetches both files and parses them out, and the panel is split
+into the two layers. Changing a function's arguments puts its
 documentation in the same diff as the change.
 
 A block looks like this, and the first line gives the signature and the section:
