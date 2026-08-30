@@ -528,6 +528,50 @@ picked = await pickFont();
 ok('and with nowhere to put it, it gives you the name',
    picked.trim() === `'${family}'`, JSON.stringify(picked.trim()));
 
+/* ---- the edit-see loop ----
+
+   Looping the whole timeline means that after every edit you sit through
+   everything in front of your shot before seeing the change. Every other cost
+   in the editor is paid once; this one is paid on every edit. */
+await type(`duration(1200);\ntext('A').size(120).center(400).enter(300);`);
+await page.click('.clip');
+await page.waitForTimeout(500);
+ok('it loops the clip you are working on',
+   (await page.textContent('#loopWhat')) === 'loop clip',
+   `"${await page.textContent('#loopWhat')}" — ${await page.textContent('#sel')}`);
+
+const msNow = async () => {
+  const [, , sec, fr] = (await page.textContent('#tc')).split(':').map(Number);
+  return sec * 1000 + Math.round(fr * 1000 / 60);
+};
+const clipSpan = await page.evaluate(() => {
+  const el = document.querySelector('.clip.sel') || document.querySelector('.clip');
+  return Number(el.querySelector('.cd').textContent.replace('s', '')) * 1000;
+});
+await page.evaluate(() => document.activeElement.blur());
+await page.keyboard.press('r');                 /* replay */
+const seen = [];
+for (let i = 0; i < 12; i++) { await page.waitForTimeout(190); seen.push(await msNow()); }
+await page.keyboard.press('k');
+/* By this point in the suite the clip does not start at t=0, so what matters
+   is the WIDTH of what was played rather than where on the timeline it sat. */
+const played = Math.max(...seen) - Math.min(...seen);
+ok('and never runs past its end', played <= clipSpan + 120,
+   `${clipSpan}ms clip, playhead covered ${played}ms`);
+ok('and it wraps rather than stopping',
+   seen.some((v, i) => i > 0 && v < seen[i - 1]), seen.join(' '));
+
+/* the point of all of it: change a number and see it again, hands on keys */
+await page.keyboard.press('r');
+await page.waitForTimeout(700);
+const beforeEdit = await msNow();
+await type(`duration(1200);\ntext('A').size(140).center(400).enter(300);`);
+await page.waitForTimeout(300);
+const afterEdit = await msNow();
+ok('an edit restarts it from the top while playing', afterEdit < beforeEdit,
+   `was at ${beforeEdit}ms, back to ${afterEdit}ms without touching the playhead`);
+await page.keyboard.press('k');
+
 /* ---- the layout is yours and it stays ---- */
 const paneVars = () => page.evaluate(() => {
   const s = getComputedStyle(document.documentElement);

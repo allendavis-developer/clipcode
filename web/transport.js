@@ -6,7 +6,7 @@
    what you scrub past is exactly what a render would be handed — a preview
    that interpolated between frames would be a different picture and a lie.
    ========================================================================== */
-import { S, $, clamp, qFrame, qTime, tc, duration } from './state.js';
+import { S, $, clamp, qFrame, qTime, tc, duration, clipById } from './state.js';
 import * as Stage from './stage.js';
 import { draggable } from './drag.js';
 
@@ -19,6 +19,7 @@ export function init(handlers = {}) {
   onFrame = handlers.onFrame || onFrame;
   edits = handlers.edits || edits;
   $('#play').onclick = () => setPlaying(!S.playing);
+  const rp = $('#replay'); if (rp) rp.onclick = replay;
   $('#stepB').onclick = () => step(-1);
   $('#stepF').onclick = () => step(1);
   $('#toStart').onclick = () => { setPlaying(false); seek(0); };
@@ -81,16 +82,44 @@ export function step(n) { setPlaying(false); seek(qTime(qFrame(S.t) + n)); }
 const text = (sel, str) => { const el = $(sel); if (el) el.textContent = str; };
 let loopErr = null;
 
+/* What playback repeats over.
+
+   Looping the WHOLE timeline is right when you are watching the video and
+   useless when you are making one shot: after every edit you sit through
+   everything in front of it before seeing the change. So a selected clip is
+   what loops, and the timeline only when nothing is selected.
+
+   This is the single biggest cost in the edit-see loop. Everything else in
+   the editor costs you once; waiting to see your change costs you on every
+   keystroke you stop typing after. */
+export function loopSpan() {
+  const f = S.sel && clipById(S.sel);
+  if (f) {
+    const c = f.clip;
+    return { from: c.start, to: c.start + (c.out - c.in), clip: c };
+  }
+  return { from: 0, to: duration(), clip: null };
+}
+
+/* Back to the top of whatever is looping, and go. The one gesture you want
+   after changing a number. */
+export function replay() {
+  const span = loopSpan();
+  S.t = span.from;
+  Stage.invalidate();
+  setPlaying(true);
+}
+
 function tick(now) {
   try {
     const dt = now - last;
     last = now;
     if (S.playing) {
       S.t += dt;
-      const end = duration();
-      if (S.t >= end) {
-        if (S.loop && end > 0) S.t = 0;
-        else { S.t = end; setPlaying(false); }
+      const span = loopSpan();
+      if (S.t >= span.to) {
+        if (S.loop && span.to > span.from) S.t = span.from;
+        else { S.t = span.to; setPlaying(false); }
       }
     }
     Stage.paint().then(() => { painted++; }, () => {});
@@ -104,6 +133,15 @@ function tick(now) {
       fpsAt = now;
     }
     drawScrub();
+    /* The label says what it repeats, because it is now two different things
+       and a checkbox that means one of two things without saying which is a
+       checkbox you have to test to understand. */
+    const what = $('#loopWhat');
+    if (what) {
+      const span = loopSpan();
+      const want = span.clip ? 'loop clip' : 'loop all';
+      if (what.textContent !== want) what.textContent = want;
+    }
     onFrame();
   } catch (e) {
     /* report once, then carry on — a loop that logs 60 errors a second is
@@ -140,7 +178,8 @@ export function bindKeys(actions = {}) {
       case 'ArrowRight': e.preventDefault(); step(shift ? 5 : 1); break;
       case 'ArrowUp':    e.preventDefault(); gotoEdit(-1); break;
       case 'ArrowDown':  e.preventDefault(); gotoEdit(1); break;
-      case 'Home':       setPlaying(false); seek(0); break;
+      case 'r': case 'R': e.preventDefault(); replay(); break;
+      case 'Home':       setPlaying(false); seek(loopSpan().from); break;
       case 'End':        setPlaying(false); seek(duration()); break;
       /* editing */
       case 'Delete':

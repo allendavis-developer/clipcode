@@ -60,13 +60,14 @@
           <button class="tbtn" id="prevEdit" title="Previous edit &mdash; Up">&lt;&lt;</button>
           <button class="tbtn" id="stepB" title="Back one frame &mdash; Left">&lt;|</button>
           <button class="tbtn play" id="play" title="Play / pause &mdash; Space">&#9654;</button>
+          <button class="tbtn" id="replay" title="Replay this clip from its start &mdash; R">&#8635;</button>
           <button class="tbtn" id="stepF" title="Forward one frame &mdash; Right">|&gt;</button>
           <button class="tbtn" id="nextEdit" title="Next edit &mdash; Down">&gt;&gt;</button>
           <button class="tbtn" id="toEnd" title="Go to end &mdash; End">&gt;|</button>
         </div>
 
         <div class="mSide right">
-          <label class="chk" title="loop playback"><input type="checkbox" id="loop" checked> loop</label>
+          <label class="chk" id="loopLabel" title="Repeat the selected clip, or the whole timeline when nothing is selected"><input type="checkbox" id="loop" checked> <span id="loopWhat">loop</span></label>
           <span id="what" class="mono dim" title="what the viewer is showing right now">&mdash;</span>
           <span id="fps" class="mono dim">&mdash;</span>
           <span id="len" class="mono tcEnd">&mdash;</span>

@@ -144,6 +144,12 @@ Editor.init({
     if (declared) applyDuration(clip.id, declared);
     Stage.reloadClip(clip.id);
     Stage.invalidate();
+    /* Your change, from the top, without touching anything.
+
+       Only while playing, which makes it opt-in by a gesture you already have:
+       press space once and the clip repeats while you work, and every edit
+       starts it again. Stopped, nothing jumps under you mid-thought. */
+    if (S.playing) Transport.replay();
   }
 });
 

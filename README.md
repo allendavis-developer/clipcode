@@ -249,6 +249,24 @@ playhead, selection, timeline zoom.
 
 ---
 
+## The edit-see loop
+
+Every other cost in this editor is paid once. Waiting to see your change is
+paid on every edit, so it gets its own design:
+
+- **Loop repeats the clip you are working on**, not the whole timeline. The
+  checkbox says which — `loop clip` when one is selected, `loop all` when none
+  is. With twenty shots in a video you no longer sit through nineteen of them
+  to watch the twentieth.
+- **`R` replays** from the top of whatever is looping. `Home` goes there too.
+- **An edit restarts it.** While playback is running, applying a change puts
+  the playhead back to the start of the clip. Press space once and the shot
+  repeats while you work; every change you make plays again by itself. Stopped,
+  nothing moves under you mid-thought — so it is opt-in by a gesture you
+  already have rather than a setting.
+
+---
+
 ## Known gaps
 
 - **No export.** You can build a video and not get an mp4 out. Biggest one.
