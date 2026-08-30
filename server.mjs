@@ -92,8 +92,13 @@ function sharedScripts(projectName) {
     .join('\n');
 }
 
-function shell(js, w, h, faces, shared) {
+function shell(js, w, h, faces, shared, project) {
   const head = `<!doctype html><meta charset="utf-8">
+<!-- Relative paths in a clip resolve from the PROJECT, not from the clip file.
+     Without this, the documented img('shot', 'media/city.jpg') looked up
+     clips/media/city.jpg, found nothing, and drew a zero-width image with no
+     error anywhere -- a black frame and a correct-looking DOM. -->
+<base href="/p/${encodeURIComponent(project || '')}/">
 <script>var SHELL_OFFSET = __OFFSET__;<\/script>
 <style>
 ${faces || ''}
@@ -122,9 +127,16 @@ ${shared || ''}
    is how a missing comma used to surface as "the clip did not finish loading"
    with no line and no hint. From here it arrives with both. */
 window.onerror = function (msg, file, line, col) {
+  /* Only the clip's own script sits under the wrapper, so only its line
+     numbers need the wrapper taken back off. A throw from a lib/ file arrives
+     with the line it really is on, and subtracting from that would point at
+     the wrong line of the wrong file. */
+  var mine = !file || file.indexOf(location.pathname) >= 0;
   parent.postMessage({ studio: 'error', message: String(msg),
-                       line: Math.max(1, (line || 0) - SHELL_OFFSET),
-                       col: col || 0, src: location.pathname }, '*');
+                       line: mine ? Math.max(1, (line || 0) - SHELL_OFFSET) : (line || 0),
+                       col: col || 0,
+                       where: mine ? null : String(file).split('/').pop(),
+                       src: location.pathname }, '*');
 };
 </script>
 <script>
@@ -143,6 +155,17 @@ function html(markup){
   if (st.__html !== markup) { st.__html = markup; st.insertAdjacentHTML('beforeend', markup); }
 }
 window.__render = function (t, frame) {
+/* The clip's own code has t as an argument. Shared code in lib/ does not: it
+   is loaded as its own script, so a function declared there cannot see a
+   caller's local, and every shared helper would have had to take t as its
+   first parameter and have it threaded through by hand -- which is exactly the
+   ceremony the whole layer exists to remove.
+
+   So the frame's time is published for the duration of the frame. It is set
+   from the argument on every call and never accumulates, so the render is as
+   pure as it was; and inside the clip body the parameter still shadows it, so
+   the two can never disagree. */
+window.t = t; window.frame = frame;
 if (window.__sceneBegin) window.__sceneBegin();
 try {`;
 
@@ -484,7 +507,7 @@ const server = http.createServer(async (req, res) => {
       catch { res.writeHead(404); return res.end('not found'); }
       const pname = rest.slice(0, slash);
       const out = Buffer.from(
-        shell(js, w, h, fontFaces(pname), sharedScripts(pname)), 'utf8');
+        shell(js, w, h, fontFaces(pname), sharedScripts(pname), pname), 'utf8');
       res.writeHead(200, { 'content-type': MIME['.html'], 'content-length': out.length,
                            'cache-control': 'no-store' });
       return res.end(out);

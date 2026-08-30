@@ -106,7 +106,11 @@ addEventListener('message', ev => {
     }
     if (d.studio === 'note') onNote(id, d.message);
     if (d.studio === 'error')
-      fail(id, `line ${d.line}: ${d.message}`, { line: d.line, col: d.col || 0 });
+      fail(id, d.where ? `${d.where} line ${d.line}: ${d.message}`
+                       : `line ${d.line}: ${d.message}`,
+           /* a lib file's line is not a line in the open clip, so nothing in
+              the code pane should be marked for it */
+           d.where ? null : { line: d.line, col: d.col || 0 });
     if (d.studio === 'timeout') fail(id, 'the clip did not finish loading');
   }
 });
