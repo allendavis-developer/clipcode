@@ -94,7 +94,7 @@ ok('new clip has no boilerplate', !/<meta|<style|__ready|__render/.test(src),
 ok('new clip file is .js', clips().some(f => f.endsWith('.js')), clips().join(', '));
 
 /* ---- the viewer sizes its iframe ---- */
-await type(`duration(4000);\nline('big', 'ON SCREEN', t, { top: 400, size: 220,\n  o: on(0, 400), y: go(0, 400, -80, 0, back) });`);
+await type(`duration(4000);\nline('big', 'ON SCREEN', t, { top: 400, size: 220,\n  opacity: fadeIn(0, 400), y: change(0, 400, -80, 0, overshoot) });`);
 const geo = await page.evaluate(() => {
   const f = document.querySelector('#stage iframe'), s = document.querySelector('#stageFit');
   if (!f || !s) return null;
@@ -174,7 +174,7 @@ ok('the line number is exact', /^line 5 /.test(mk.strip), mk.strip);
 const off = await page.evaluate(() =>
   document.querySelector('#stage iframe').contentWindow.SHELL_OFFSET);
 ok('the shell offset is derived', typeof off === 'number' && off > 0, `${off} lines of wrapper`);
-await type(`duration(3000);\nline('big', 'fixed', t, { top: 400, size: 200, o: on(0, 300) });`);
+await type(`duration(3000);\nline('big', 'fixed', t, { top: 400, size: 200, opacity: fadeIn(0, 300) });`);
 const cleared = await page.evaluate(() => {
   const e = document.querySelector('#stageErr');
   return !e || e.style.display === 'none';
@@ -186,7 +186,7 @@ ok('the marks clear too', !gone.line && !gone.dot && !gone.tok && !gone.strip,
    JSON.stringify(gone));
 
 /* ---- duration drives the timeline ---- */
-await type(`duration(5200);\nline('big', 'fixed', t, { top: 400, size: 200, o: on(0, 300) });`);
+await type(`duration(5200);\nline('big', 'fixed', t, { top: 400, size: 200, opacity: fadeIn(0, 300) });`);
 ok('clip length follows duration()', (await page.textContent('#len')) === '5.2s',
    await page.textContent('#len'));
 

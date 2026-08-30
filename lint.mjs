@@ -74,9 +74,8 @@ function checkDocs() {
       .map(l => (/\/\*\*\s+([\w$]+)/.exec(l) || [])[1])
       .filter(Boolean));
 
-  /* aliases kept for compatibility document themselves inside the entry they
-     alias, and E is the easing table, which has its own block */
-  const skip = new Set(['tween', 'go', 'on', 'off', 'E']);
+  /* E is the easing table, which has a block of its own */
+  const skip = new Set(['E']);
   const missing = exported.filter(n => !documented.has(n) && !skip.has(n));
   if (missing.length)
     fail('web/motion.js', `exported but not documented: ${missing.join(', ')}`);

@@ -41,6 +41,9 @@
 
   /* ------------------------------------------------------------- easings -- */
 
+
+
+
   /** How a clip works   @start
    *  A clip is code that runs once per frame. It is given one variable, t,
    *  which is the number of milliseconds since the clip started.
@@ -103,9 +106,8 @@
    *    settle      slows to a stop without passing the target
    *    hardCut     no intermediate values: off, then on
    *
-   *  The earlier names back, out, into, io, expo, soft and step still work
-   *  and map to overshoot, easeOut, easeIn, easeInOut, snap, settle and
-   *  hardCut respectively.
+   *  The earlier names back, out, into, io, expo, soft and step have been
+   *  removed. Using one raises an error naming its replacement.
    *
    *  For an easing that is not in this list, use bezier() or curve().
    *  ex  scale: change(0, 340, 0.72, 1, overshoot)
@@ -122,9 +124,7 @@
     settle:    function (t) { return 1 - Math.pow(1 - t, 5); },
     hardCut:   function (t) { return t >= 1 ? 1 : 0; }
   };
-  /* the old short names still work */
-  E.out = E.easeOut; E.into = E.easeIn; E.io = E.easeInOut;
-  E.expo = E.snap;   E.back = E.overshoot; E.soft = E.settle; E.step = E.hardCut;
+
 
   /** cl(x)   @math
    *  Clamps a number to the range 0 to 1.
@@ -141,7 +141,12 @@
    *  ex  var size = lp(200, 280, seg(t, 0, 500));
    */
   var lp  = function (a, b, t) { return a + (b - a) * t; };
-  var ease = function (e) { return typeof e === 'string' ? (E[e] || E.linear) : (e || E.linear); };
+  var ease = function (e) {
+    if (typeof e !== 'string') return e || E.linear;
+    if (E[e]) return E[e];
+    if (RENAMED[e]) throw renamedError(e);   /* not a silent fall back to linear */
+    throw new Error("there is no easing called '" + e + "'");
+  };
 
   /* --------------------------------------------------------------- track -- */
   /** track(keyframes, t)   @track
@@ -166,10 +171,8 @@
     return kfs[kfs.length - 1][1];
   }
 
-  /* Track shorthands. `o: on(0,300)` beats `o: [[0,0],[300,1]]` once you have
-     written the second one fifty times. */
-  /* change(startMs, endMs, from, to, easing) — the general one. Everything
-     else here is a change() with the obvious values already filled in. */
+  /* Track shorthands: change() is the general one, and the rest are a change()
+     with the obvious values already filled in. */
   /** change(startMs, endMs, from, to, easing)   @track
    *  Returns a track that moves a property from one value to another between
    *  two times. The value is held at `from` before startMs and at `to` after
@@ -177,7 +180,8 @@
    *
    *  easing is optional and defaults to linear.
    *
-   *  Previously named go() and tween(). Both names still work.
+   *  This was previously called go() and tween(). Those names now raise an
+   *  error telling you to use change().
    *  ex  scale: change(0, 340, 0.72, 1, overshoot)
    *  ex  y: change(200, 600, -80, 0)
    */
@@ -186,14 +190,14 @@
    *  Returns a track from 0 to 1. Equivalent to change(startMs, endMs, 0, 1,
    *  easing), and normally assigned to opacity.
    *
-   *  Previously named on(). That name still works.
+   *  This was previously called on(), which now raises an error.
    *  ex  opacity: fadeIn(0, 340)
    */
   var fadeIn  = function (a, b, e) { return [[a, 0], [b, 1, e]]; };
   /** fadeOut(startMs, endMs, easing)   @track
    *  Returns a track from 1 to 0.
    *
-   *  Previously named off(). That name still works.
+   *  This was previously called off(), which now raises an error.
    *  ex  opacity: fadeOut(1800, 2200)
    */
   var fadeOut = function (a, b, e) { return [[a, 1], [b, 0, e]]; };
@@ -203,7 +207,22 @@
    */
   var hold    = function (v) { return [[0, v]]; };
   /* the old short names still work */
-  var tween = change, go = change, on = fadeIn, off = fadeOut;
+  /* The old names, and what replaced them. They are not aliases any more:
+     each one throws and says what to write instead. A name that has moved
+     should say so once, not go on quietly working for years and leave two
+     ways to write everything. */
+  var RENAMED = {
+    go: 'change', tween: 'change', on: 'fadeIn', off: 'fadeOut',
+    back: 'overshoot', out: 'easeOut', into: 'easeIn', io: 'easeInOut',
+    expo: 'snap', soft: 'settle', step: 'hardCut',
+    eOut: 'easeOut', eExpo: 'snap', eIO: 'easeInOut'
+  };
+  function renamedError(from) {
+    return new Error(from + ' has been renamed to ' + RENAMED[from]);
+  }
+  function renamed(from) {
+    return function () { throw renamedError(from); };
+  }
 
   /* ------------------------------------------------------------- bezier --
      Your own easing curve, the same four numbers CSS uses. Draw one at
@@ -620,12 +639,14 @@
        line('l1', '3,361 people', t, {
          top: 340, size: 268, color: '#ffb02e', font: 'Fraunces 72pt Black',
          italic: true, gap: 130, from: 90, alt: true,
-         o: on(0, 340), y: go(0, 340, -70, 0, back)
+         opacity: fadeIn(0, 340), y: change(0, 340, -70, 0, overshoot)
        });                                                                   */
   var STYLE = { top:1, left:1, right:1, bottom:1, width:1, size:1, color:1,
                 font:1, italic:1, weight:1, align:1, tracking:1, leading:1,
                 shadow:1, background:1, zIndex:1 };
   var TIMING = { gap:1, from:1, alt:1, each:1, parent:1 };
+
+
 
 
 
@@ -812,8 +833,6 @@
 
   var API = { E:E, track:track, change:change, bezier:bezier, curve:curve,
               fadeIn:fadeIn, fadeOut:fadeOut, hold:hold, anim:anim,
-              /* older short names, still supported */
-              tween:tween, on:on, off:off, go:go,
               stagger:stagger, words:words, chars:chars, box:box, img:img,
               label:label, pill:pill, camera:camera, draw:draw, wipe:wipe,
               ring:ring, grid:grid, rnd:rnd, enter:enter, drift:drift, line:line, block:block,
@@ -823,7 +842,6 @@
   W.linear = E.linear; W.easeIn = E.easeIn; W.easeOut = E.easeOut;
   W.easeInOut = E.easeInOut; W.snap = E.snap; W.overshoot = E.overshoot;
   W.settle = E.settle; W.hardCut = E.hardCut;
-  W.back = E.back; W.out = E.out; W.expo = E.expo; W.io = E.io;
-  W.soft = E.soft; W.into = E.into; W.eOut = E.out; W.eExpo = E.expo; W.eIO = E.io;
+  for (var r in RENAMED) W[r] = renamed(r);
   W.$ = function (id) { return D.getElementById(id); };
 })(window, document);

@@ -54,12 +54,6 @@ export const SIGNATURES = {
   seg:       ['t', 'startMs', 'endMs'],
   lp:        ['from', 'to', 'u'],
   cl:        ['x'],
-
-  /* older short names, same shapes */
-  go:        ['startMs', 'endMs', 'from', 'to', 'easing'],
-  tween:     ['startMs', 'endMs', 'from', 'to', 'easing'],
-  on:        ['startMs', 'endMs', 'easing'],
-  off:       ['startMs', 'endMs', 'easing']
 };
 
 /* The options a line()/block() call understands, listed where you can see
@@ -72,4 +66,4 @@ export const OPTION_KEYS = {
 };
 
 export const EASINGS = 'linear easeIn easeOut easeInOut snap overshoot settle hardCut '
-                     + '· bezier(x1,y1,x2,y2) for your own';
+                     + '· bezier(x1,y1,x2,y2) or curve([[x,y],...]) for your own';

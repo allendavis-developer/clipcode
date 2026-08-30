@@ -114,37 +114,61 @@ function render(q) {
     || e.ex.join(' ').toLowerCase().includes(term);
 
   const shown = entries.filter(hit);
-  const nav = [], list = [];
+  const nav = [], cards = [];
 
   for (const [key, title] of GROUPS) {
     const mine = shown.filter(e => e.group === key);
     if (!mine.length) continue;
     nav.push(`<a href="#hg-${key}">${title}</a>`);
-    list.push(`<h3 id="hg-${key}">${title}</h3>`);
-    for (const e of mine) list.push(card(e));
+    cards.push(`<h3 id="hg-${key}">${title}</h3>`);
+    for (const e of mine) cards.push(card(e));
   }
   const rest = shown.filter(e => !GROUPS.some(g => g[0] === e.group));
   if (rest.length) {
     nav.push('<a href="#hg-other">Everything else</a>');
-    list.push('<h3 id="hg-other">Everything else</h3>');
-    for (const e of rest) list.push(card(e));
+    cards.push('<h3 id="hg-other">Everything else</h3>');
+    for (const e of rest) cards.push(card(e));
   }
 
   host.querySelector('#helpNav').innerHTML = nav.join('');
-  host.querySelector('#helpList').innerHTML = list.length
-    ? list.join('')
+  host.querySelector('#helpList').innerHTML = cards.length
+    ? cards.join('')
     : `<p class="helpNone">Nothing matches “${esc(term)}”.</p>`;
 
   host.querySelectorAll('.helpEx').forEach(pre => {
     pre.onclick = () => { insertAt(pre.dataset.code); hide(); };
   });
+  /* Scroll the LIST, by setting its scrollTop from the heading's offset within
+     it. scrollIntoView would work on the element but scrolls whichever
+     ancestors it likes, and the headings are sticky, which makes where it
+     lands hard to predict. #helpList is position:relative so offsetTop is
+     measured against it.
+
+     Instantly, not smoothly: the list is several thousand pixels tall, and a
+     smooth scroll across that takes seconds, during which the panel looks as
+     though the click did nothing. */
+  const list = host.querySelector('#helpList');
   host.querySelectorAll('#helpNav a').forEach(a => {
     a.onclick = ev => {
       ev.preventDefault();
-      host.querySelector(a.getAttribute('href').replace('#', '#'))
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const target = host.querySelector(a.getAttribute('href'));
+      if (target) { list.scrollTo({ top: target.offsetTop, behavior: 'auto' }); markNav(); }
     };
   });
+  markNav();
+  list.onscroll = markNav;
+}
+
+/* Light up the section you are actually looking at, so the nav reports where
+   you are rather than only taking you places. */
+function markNav() {
+  const list = host.querySelector('#helpList');
+  if (!list) return;
+  const heads = [...list.querySelectorAll('h3')];
+  let current = heads[0];
+  for (const h of heads) if (h.offsetTop - 8 <= list.scrollTop) current = h;
+  host.querySelectorAll('#helpNav a').forEach(a =>
+    a.classList.toggle('on', !!current && a.getAttribute('href') === '#' + current.id));
 }
 
 /* The docs contain two kinds of text, and they want different treatment.

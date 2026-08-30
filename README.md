@@ -137,9 +137,11 @@ Easings: `linear easeIn easeOut easeInOut snap overshoot settle hardCut`, or
 either and the curve editor opens on it, with a preview you can pause and set to
 the length of the move it is attached to.
 
-The earlier names still work: `go` is `change`, `on` is `fadeIn`, `off` is
-`fadeOut`, and `back out into io expo soft step` are `overshoot easeOut easeIn
-easeInOut snap settle hardCut`.
+The earlier names have been removed. `go` `tween` `on` `off` and the easings
+`back out into io expo soft step` each raise an error naming their replacement
+(`change` `change` `fadeIn` `fadeOut`, `overshoot easeOut easeIn easeInOut snap
+settle hardCut`) rather than quietly continuing to work. Two ways to write the
+same thing is worse than one rename.
 
 A **track** is `[[time, value], [time, value, easing]]`, sampled at `t` and held
 outside its range. Every animated number in the system is one.
