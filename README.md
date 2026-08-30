@@ -330,6 +330,52 @@ same:
 
 ---
 
+## Editing something that is already built
+
+```
+node studio/plan.mjs myvideo            what is in it, resolved
+node studio/plan.mjs myvideo --json     the same, for something editing the files
+```
+
+The expensive part of a video is construction — laying out the scenes, the
+typography, the camera moves, the timing. The cheap part is taste: this number
+twenty pixels higher, that entrance less aggressive, the second statistic a
+beat later. Those should be small edits to a legible file, never a
+regeneration.
+
+Three things make that work, and they were built for a person before they were
+useful to an assistant:
+
+**Timings are relationships.** `subtitle.enter(250).after(title, 80)` says one
+thing in the file and another on the timeline. "Make the second statistic enter
+later" is one number in one line, and everything downstream follows — which is
+a diff, not a rewrite.
+
+**`.as('name')` gives a stable handle.** Identity is otherwise the *order* of
+the calls, which is right when a person is writing — `text('hello')` is enough,
+no bookkeeping — but fragile for anything editing the file later, because
+inserting one line renumbers everything below it. Name whatever you expect to
+come back and adjust.
+
+**`plan.mjs` says what it resolved to.** Reading the source tells you what was
+*written*; this tells you what it *came to*, and with relative timings those
+are different and you need both:
+
+```
+  stats.js
+  on the timeline   0ms to 2600ms   (track V1)
+    camera   3 moves                     0 to   1400
+    title    3361 people                 0 to    340
+    commits  85,957 commits            460 to    760   <- after(title, 120)
+    s2t      and counting              840 to   1100   <- after(commits, 80)
+```
+
+It asks each clip in the same browser the editor uses, rather than
+re-implementing the resolver — a second copy would drift from the one the
+picture is drawn from, which is the whole failure it avoids.
+
+---
+
 ## Getting a video out
 
 ```

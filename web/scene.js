@@ -173,6 +173,7 @@
     this.alt = false;                 /* every second child reversed */
     this.z = 0;                       /* depth, in pixels from the stage plane */
     this.kind = kind;                 /* text | image | shape | group | items */
+    this.name = null;                 /* a stable handle, if one was given */
     this.id = idFor(kind);
     this.opts = opts || {};
     this.css = {};                    /* fixed appearance */
@@ -261,6 +262,26 @@
       this.css.right = 'auto';
       if (this.css.textAlign === undefined) this.css.textAlign = 'left';
     }
+    return this;
+  };
+
+  /** .as(name)   @look
+   *  Give it a name, so it can be found and changed later.
+   *
+   *  Identity here is normally the ORDER of the calls, which is right when a
+   *  person is writing: text('hello') is enough and there is no bookkeeping.
+   *  But order is a fragile handle for anything editing the file afterwards —
+   *  insert one line near the top and every thing below it is renumbered.
+   *
+   *  A name is a stable handle. Give one to anything you expect to come back
+   *  and adjust, or that you want an assistant to be able to change without
+   *  rewriting the shot around it. It also shows up in the plan, so
+   *  "the second statistic enters later" becomes one number in one line.
+   *  ex  text('3361 people').as('stat').size(268).enter(340, 'pop');
+   *  ex  text('85,957 commits').as('commits').enter(300).after(stat, 120);
+   */
+  P.as = function (name) {
+    if (name) this.name = String(name);
     return this;
   };
 
@@ -948,11 +969,13 @@
       ? [{ id: 'camera', kind: 'camera', text: camera.moves.length + ' moves',
            start: 0, end: Math.round(camera.length()), rel: 'absolute' }] : [];
     return out.concat(nodes.map(function (n) {
-      return { id: n.id, kind: n.kind,
+      return { id: n.id, name: n.name || null, kind: n.kind,
                text: (n.opts.text || '').slice(0, 24),
                start: Math.round(n.startsAt()),
                end: Math.round(n.endsAt()),
-               rel: n._rel ? n._rel.how + '(' + n._rel.of.id
+               /* the name if it has one: a relationship is a thing you read
+                  and then edit, and s0t is not a thing anyone can act on */
+               rel: n._rel ? n._rel.how + '(' + (n._rel.of.name || n._rel.of.id)
                              + (n._rel.gap ? ', ' + n._rel.gap : '') + ')' : 'absolute' };
     }));
   };
