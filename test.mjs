@@ -276,6 +276,67 @@ await page.waitForTimeout(250);
 ok('matching sets that length', (await page.textContent('#curveDurVal')) === '0.34s',
    await page.textContent('#curveDurVal'));
 
+/* ---- the reference ----
+
+   Its content comes out of the doc comments in motion.js, so these checks are
+   really asking whether the parser still agrees with the format those comments
+   are written in. A silently empty panel is the failure to catch. */
+await page.keyboard.press('F1');
+await page.waitForTimeout(700);
+ok('F1 opens the reference',
+   await page.evaluate(() => !document.querySelector('#help').classList.contains('hidden')));
+
+const cards = await page.$$eval('.helpCard', n => n.length);
+ok('every function is documented', cards >= 30, `${cards} entries`);
+ok('and every one has an example',
+   (await page.evaluate(() => [...document.querySelectorAll('.helpCard')]
+     .filter(c => !c.querySelector('.helpEx')).length)) === 0);
+ok('aligned tables keep their columns',
+   /^ {2}linear {4,}constant rate$/m.test(await page.evaluate(() =>
+     [...document.querySelectorAll('.helpDefs')].map(n => n.textContent).join('\n'))));
+
+await page.fill('#helpFind', 'stagger');
+await page.waitForTimeout(350);
+const few = await page.$$eval('.helpCard', n => n.length);
+ok('search narrows it', few > 0 && few < cards, `${few} of ${cards}`);
+await page.fill('#helpFind', '');
+await page.waitForTimeout(300);
+
+/* clicking an example puts it in the code, and it must PARSE */
+await type('duration(3000);\n');
+await page.keyboard.press('F1');
+await page.waitForTimeout(600);
+await page.evaluate(() => {
+  const c = [...document.querySelectorAll('.helpCard')]
+    .find(c => c.querySelector('.helpSig').textContent.startsWith('line(id'));
+  c.scrollIntoView();
+  c.querySelector('.helpEx').click();
+});
+await page.waitForTimeout(2200);
+const inserted = await page.evaluate(() =>
+  document.querySelector('.CodeMirror').CodeMirror.getValue());
+ok('clicking an example inserts it', /^duration\(3000\);\nline\('l1'/.test(inserted),
+   JSON.stringify(inserted.slice(0, 46)));
+ok('and the inserted example runs', (await page.textContent('#codeErr')) === '',
+   await page.textContent('#codeErr'));
+
+await page.keyboard.press('F1');
+await page.waitForTimeout(400);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+ok('Escape closes it',
+   await page.evaluate(() => document.querySelector('#help').classList.contains('hidden')));
+
+/* the point of putting it in the editor: you can reach it without stopping */
+await page.click('.CodeMirror');
+await page.waitForTimeout(200);
+await page.keyboard.press('F1');
+await page.waitForTimeout(500);
+ok('F1 works while typing code',
+   await page.evaluate(() => !document.querySelector('#help').classList.contains('hidden')));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+
 ok('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 await browser.close();

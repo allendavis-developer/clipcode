@@ -58,8 +58,40 @@ function check(file) {
   if (text.charCodeAt(0) === 0xfeff) fail(rel, 'byte order mark');
 }
 
+/* Every function the library exports must carry a doc block, because those
+   blocks ARE the reference panel. A function with no comment is a function
+   that is invisible to anyone reading F1, which is worse than undocumented:
+   it looks as though it does not exist. */
+function checkDocs() {
+  const src = fs.readFileSync(path.join(HERE, 'web/motion.js'), 'utf8');
+
+  const api = /var API = \{([\s\S]*?)\};/.exec(src);
+  if (!api) return fail('web/motion.js', 'cannot find the API export list');
+  const exported = [...api[1].matchAll(/([A-Za-z_$][\w$]*)\s*:/g)].map(m => m[1]);
+
+  const documented = new Set(
+    (src.match(/\/\*\*[^\n]*/g) || [])
+      .map(l => (/\/\*\*\s+([\w$]+)/.exec(l) || [])[1])
+      .filter(Boolean));
+
+  /* aliases kept for compatibility document themselves inside the entry they
+     alias, and E is the easing table, which has its own block */
+  const skip = new Set(['tween', 'go', 'on', 'off', 'E']);
+  const missing = exported.filter(n => !documented.has(n) && !skip.has(n));
+  if (missing.length)
+    fail('web/motion.js', `exported but not documented: ${missing.join(', ')}`);
+
+  /* and a doc block whose signature names something that is not exported is a
+     rename that only got done on one side */
+  const stale = [...documented].filter(n =>
+    /^[a-z]/.test(n) && !exported.includes(n) && !skip.has(n));
+  if (stale.length)
+    fail('web/motion.js', `documented but not exported: ${stale.join(', ')}`);
+}
+
 console.log('\nSTUDIO — source hygiene\n');
 walk(HERE);
+checkDocs();
 
 /* and it must actually parse */
 for (const f of ['server.mjs', 'lib/paths.mjs', 'lib/project.mjs', 'lib/media.mjs',

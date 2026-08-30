@@ -54,6 +54,9 @@ server.mjs              http routing, and nothing else
     timeline.js         arranging clips with a mouse
     transport.js        the clock, the playhead, the keyboard
     editor.js           the code pane and a clip's source
+    help.js             the F1 reference, parsed out of motion.js
+    curve.js            the easing editor
+    drag.js             the one drag primitive
     pool.js             media, and getting it into the project
     motion.js           the editing library, injected into every clip
     presets.js          built-in moves
@@ -134,6 +137,10 @@ Easings: `linear easeIn easeOut easeInOut snap overshoot settle hardCut`, or
 either and the curve editor opens on it, with a preview you can pause and set to
 the length of the move it is attached to.
 
+The earlier names still work: `go` is `change`, `on` is `fadeIn`, `off` is
+`fadeOut`, and `back out into io expo soft step` are `overshoot easeOut easeIn
+easeInOut snap settle hardCut`.
+
 A **track** is `[[time, value], [time, value, easing]]`, sampled at `t` and held
 outside its range. Every animated number in the system is one.
 
@@ -160,6 +167,35 @@ pane widths, timeline zoom.
   having that write back into the code is not built yet.
 - Errors are reported when the clip runs, not as you type. A syntax error shows
   up about a second after you stop typing, not on the keystroke.
+
+---
+
+## The reference is the source
+
+Press **F1** (or the Help button, or `?`) for the reference. Search it, and
+click any example to insert it at the cursor.
+
+Nothing in that panel is written twice. Every entry is a doc comment sitting
+directly above the function it describes in `web/motion.js`; `web/help.js`
+fetches that file and parses them out. Changing a function's arguments puts its
+documentation in the same diff as the change.
+
+A block looks like this, and the first line gives the signature and the section:
+
+```
+  /** stagger(list, t, gapMs, spec, options)   @move
+   *  Applies the same spec to every element in list, delaying each one by
+   *  gapMs more than the previous.
+   *  ex  stagger(words('l1', 'a b c'), t, 130, { opacity: fadeIn(0, 300) });
+   */
+```
+
+Groups are `start type track move make draw place math easing option`. Lines
+beginning `ex` are examples. Indented lines are rendered as aligned columns;
+everything else re-flows as a paragraph.
+
+`npm run lint` fails if a function is exported without a doc block, or if a
+block names something that is no longer exported.
 
 ---
 

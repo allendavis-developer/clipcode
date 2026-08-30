@@ -197,6 +197,30 @@ export function showError(msg, where) {
 }
 export const openClip = () => clip;
 
+/* Put text in as whole lines, indented to match where the cursor is. Used by
+   the reference: clicking an example lands it in the code rather than making
+   you retype it.
+
+   Whole lines, never mid-line, because an example is a statement. Dropping
+   one into the middle of an existing line only ever produces a syntax error. */
+export function insertAtCursor(text) {
+  if (!cm || !text) return;
+  cm.focus();
+  const cur = cm.getCursor();
+  const here = cm.getLine(cur.line) || '';
+  const pad = (here.match(/^\s*/) || [''])[0];
+  const body = String(text).split('\n')
+    .map(l => (l ? pad + l : '')).join('\n');
+
+  /* an empty line is replaced; a line with code on it is inserted after */
+  const blank = !here.trim();
+  const from = blank ? { line: cur.line, ch: 0 } : { line: cur.line, ch: here.length };
+  const to = blank ? { line: cur.line, ch: here.length } : from;
+  cm.replaceRange(blank ? body : '\n' + body, from, to);
+  cm.setCursor({ line: cur.line + body.split('\n').length - (blank ? 1 : 0), ch: 0 });
+  apply();
+}
+
 /* The clip is gone. Drop it WITHOUT writing — a pending idle save or a blur
    would otherwise put the file straight back on disk after it was deleted. */
 export function forget(id) {

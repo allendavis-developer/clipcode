@@ -18,6 +18,8 @@ import * as TL from './timeline.js';
 import * as Transport from './transport.js';
 import * as Editor from './editor.js';
 import * as Pool from './pool.js';
+import * as Help from './help.js';
+import * as Curve from './curve.js';
 import { draggable, cursorDuring } from './drag.js';
 
 async function api(url, method = 'GET', body) {
@@ -110,8 +112,16 @@ Transport.init({
 Transport.bindKeys({
   deleteClip,
   split: () => TL.splitAtPlayhead(),
-  zoom: k => { S.pxPerSec = clamp(S.pxPerSec * k, 4, 600); TL.draw(); }
+  zoom: k => { S.pxPerSec = clamp(S.pxPerSec * k, 4, 600); TL.draw(); },
+  help: () => Help.toggle(),
+  /* one Escape, one thing closed, topmost first */
+  escape: () => { if (Help.isOpen()) Help.hide(); else Curve.hide(); }
 });
+
+/* The reference reads itself out of motion.js, so an example you click into
+   your code is the same text that documents the function. */
+Help.init({ insert: text => Editor.insertAtCursor(text) });
+$('#btnHelp').onclick = Help.toggle;
 
 TL.wire({
   seek: ms => { Transport.setPlaying(false); Transport.seek(ms); },

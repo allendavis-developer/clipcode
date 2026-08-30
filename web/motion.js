@@ -1,64 +1,160 @@
 /* ============================================================================
-   THE EDITING LIBRARY — injected into every code clip, before its own script.
+   The editing library. Injected into every code clip, before the clip's own
+   script, so everything below is available as a global inside a clip.
 
-   This is where the speed comes from. Not from presets, and not from typing
-   being faster than clicking: from the fact that in a node editor the cost of
-   a move is proportional to the number of things it moves, and here it is
-   flat. Twelve words staggered costs exactly what one word costs.
+   The doc comments in this file are the reference shown by the Help panel
+   (F1). web/help.js parses them out of this source, so the reference and the
+   code cannot disagree. A block opens with a doc marker, then:
 
-   Four ideas, and everything else is built on them:
+       signature   @group
+       Description, one or more lines.
+       ex  a runnable example
 
-     1  A TRACK is [[time, value], [time, value, easing]] — sampled at t,
-        held outside its range. Every animated number in this system is one.
+   Groups are start, type, track, move, make, draw, place, math, easing and
+   option, and set which section of the panel an entry appears under.
 
-     2  anim(el, t, spec) applies a spec of tracks. Properties that share a
-        transform (x y z s r rx ry) compose into one string in a fixed order,
-        so they cannot fight. blur / bright / sat compose into one filter.
+   The design rests on four things:
 
-     3  stagger(list, t, gap, spec) is the same spec down a list, each later
-        than the last. That is what kinetic type IS.
+     1  A track is [[time, value], [time, value, easing]]. It is sampled at t
+        and held outside its range. Every animated value is one of these.
 
-     4  Elements can be MADE from code — box, label, img, pill — so a clip is
-        one file with one language in it, not markup over here and animation
-        over there. Making is idempotent: safe to call every frame.
+     2  anim(el, t, spec) applies an object of tracks. Properties sharing a
+        CSS transform are composed into one string in a fixed order so they
+        cannot overwrite each other, and the three filter properties likewise.
 
-   Everything is a pure function of t. Nothing schedules, nothing accumulates.
-   That is what keeps scrubbing, playback and the render identical.
+     3  stagger(list, t, gap, spec) applies one spec down a list with an
+        increasing delay. The cost of writing it does not grow with the length
+        of the list, which is the main advantage over a node-based editor.
+
+     4  Elements are created from code (box, label, img, pill), so a clip is
+        one file in one language. Creation is idempotent and safe to call on
+        every frame.
+
+   Every function here is a pure function of t: nothing schedules and nothing
+   accumulates. That is what keeps scrubbing, playback and export identical.
    ========================================================================== */
 (function (W, D) {
   'use strict';
 
+
+
+
   /* ------------------------------------------------------------- easings -- */
+
+  /** How a clip works   @start
+   *  A clip is code that runs once per frame. It is given one variable, t,
+   *  which is the number of milliseconds since the clip started.
+   *
+   *  The code does not advance time and does not wait. Its job is to answer
+   *  a single question: at time t, what does the frame look like? The editor
+   *  calls it again with a different t for the next frame.
+   *
+   *  There is therefore no play, no wait, and no then. Values are described
+   *  across a span of time, and the editor asks for whichever moment it
+   *  needs to draw.
+   *  ex  duration(2200);
+   *  ex
+   *  ex  line('l1', '3361 people', t, { top: 340, size: 268 });
+   */
+
+  /** How to write a move   @start
+   *  Animated values all use the same form:
+   *
+   *      property: change(startMs, endMs, from, to, easing)
+   *
+   *  For example, scale: change(0, 340, 0.72, 1, overshoot) means the scale
+   *  is 0.72 until 0ms, moves to 1 between 0ms and 340ms following the
+   *  overshoot easing, and stays at 1 afterwards.
+   *
+   *  The value outside the given range is held, not reset. Several
+   *  properties can be animated in the same options list.
+   *  ex  line('l1', 'example text', t, {
+   *  ex    top: 340, size: 268,
+   *  ex    opacity: fadeIn(0, 340),
+   *  ex    scale: change(0, 340, 0.72, 1, overshoot),
+   *  ex    y: change(0, 340, -70, 0, overshoot)
+   *  ex  });
+   */
+
+  /** Rendering must be repeatable   @start
+   *  The same t must always produce the same frame.
+   *
+   *  Do not use setTimeout, CSS transitions, Math.random, or any value that
+   *  accumulates between calls. If a frame depends on the frames drawn
+   *  before it, scrubbing backwards will not match scrubbing forwards, and
+   *  an export will match neither. Playback still looks correct while this
+   *  is broken, so it is difficult to notice.
+   *
+   *  For values that should look random, use rnd(i), which returns the same
+   *  number for the same i.
+   *  ex  rotation: hold(-6 + rnd(i) * 12)
+   */
+
+  /** Easings   @easing
+   *  An easing controls the rate of a move. It is the last argument of
+   *  change(), fadeIn() and fadeOut(), and defaults to linear.
+   *
+   *    linear      constant rate
+   *    easeIn      starts slowly, fastest at the end
+   *    easeOut     starts fast, slows to a stop
+   *    easeInOut   slow at both ends, fast in the middle
+   *    snap        very fast, then stops abruptly
+   *    overshoot   passes the target value and returns to it
+   *    settle      slows to a stop without passing the target
+   *    hardCut     no intermediate values: off, then on
+   *
+   *  The earlier names back, out, into, io, expo, soft and step still work
+   *  and map to overshoot, easeOut, easeIn, easeInOut, snap, settle and
+   *  hardCut respectively.
+   *
+   *  For an easing that is not in this list, use bezier() or curve().
+   *  ex  scale: change(0, 340, 0.72, 1, overshoot)
+   */
   var E = {
-    /* steady all the way — no acceleration */
     linear:    function (t) { return t; },
-    /* quick off the mark, coasting to a stop. the everyday one */
     easeOut:   function (t) { return 1 - Math.pow(1 - t, 3); },
-    /* slow to start, still moving at the end */
     easeIn:    function (t) { return t * t * t; },
-    /* slow at both ends, quick through the middle. camera moves */
     easeInOut: function (t) { return t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2; },
-    /* very fast, then a hard stop. reads as impact */
     snap:      function (t) { return t >= 1 ? 1 : 1 - Math.pow(2, -9*t); },
-    /* goes PAST the target and comes back. this is the one with weight */
     overshoot: function (t) { var c = 1.34, c3 = c + 1;
                               return 1 + c3*Math.pow(t-1,3) + c*Math.pow(t-1,2); },
-    /* eases to a stop but never past the target — for scale, where going past
-       1 reads as a wobble rather than as weight */
+    /* stops at the target rather than passing it, so scale does not wobble */
     settle:    function (t) { return 1 - Math.pow(1 - t, 5); },
-    /* no in-between: off, then on */
     hardCut:   function (t) { return t >= 1 ? 1 : 0; }
   };
   /* the old short names still work */
   E.out = E.easeOut; E.into = E.easeIn; E.io = E.easeInOut;
   E.expo = E.snap;   E.back = E.overshoot; E.soft = E.settle; E.step = E.hardCut;
 
+  /** cl(x)   @math
+   *  Clamps a number to the range 0 to 1.
+   *  ex  cl(1.4)
+   */
   var cl  = function (x) { return x < 0 ? 0 : x > 1 ? 1 : x; };
+  /** seg(t, startMs, endMs)   @math
+   *  Returns progress from 0 to 1 through the given time range, clamped at both ends.
+   *  ex  var u = seg(t, 400, 900);
+   */
   var seg = function (t, a, b) { return b === a ? (t >= b ? 1 : 0) : cl((t - a) / (b - a)); };
+  /** lp(from, to, u)   @math
+   *  Linear interpolation. Returns from when u is 0 and to when u is 1.
+   *  ex  var size = lp(200, 280, seg(t, 0, 500));
+   */
   var lp  = function (a, b, t) { return a + (b - a) * t; };
   var ease = function (e) { return typeof e === 'string' ? (E[e] || E.linear) : (e || E.linear); };
 
   /* --------------------------------------------------------------- track -- */
+  /** track(keyframes, t)   @track
+   *  Reads a list of keyframes at time t. A keyframe is [timeMs, value] or
+   *  [timeMs, value, easing], and the list must be in time order. Between
+   *  two keyframes the value is interpolated using the easing on the second
+   *  one; outside the list the nearest end value is held.
+   *
+   *  change(), fadeIn(), fadeOut() and hold() are shorthands that build
+   *  these lists. Write one directly when a property needs more than two
+   *  stops.
+   *  ex  opacity: [[0, 0], [200, 1, easeOut], [1800, 1], [2000, 0]]
+   */
   function track(kfs, t) {
     if (typeof kfs === 'number') return kfs;
     if (!kfs || !kfs.length) return 0;
@@ -74,9 +170,37 @@
      written the second one fifty times. */
   /* change(startMs, endMs, from, to, easing) — the general one. Everything
      else here is a change() with the obvious values already filled in. */
+  /** change(startMs, endMs, from, to, easing)   @track
+   *  Returns a track that moves a property from one value to another between
+   *  two times. The value is held at `from` before startMs and at `to` after
+   *  endMs.
+   *
+   *  easing is optional and defaults to linear.
+   *
+   *  Previously named go() and tween(). Both names still work.
+   *  ex  scale: change(0, 340, 0.72, 1, overshoot)
+   *  ex  y: change(200, 600, -80, 0)
+   */
   var change  = function (a, b, v0, v1, e) { return [[a, v0], [b, v1, e]]; };
+  /** fadeIn(startMs, endMs, easing)   @track
+   *  Returns a track from 0 to 1. Equivalent to change(startMs, endMs, 0, 1,
+   *  easing), and normally assigned to opacity.
+   *
+   *  Previously named on(). That name still works.
+   *  ex  opacity: fadeIn(0, 340)
+   */
   var fadeIn  = function (a, b, e) { return [[a, 0], [b, 1, e]]; };
+  /** fadeOut(startMs, endMs, easing)   @track
+   *  Returns a track from 1 to 0.
+   *
+   *  Previously named off(). That name still works.
+   *  ex  opacity: fadeOut(1800, 2200)
+   */
   var fadeOut = function (a, b, e) { return [[a, 1], [b, 0, e]]; };
+  /** hold(value)   @track
+   *  Returns a track with a single constant value.
+   *  ex  rotation: hold(-4)
+   */
   var hold    = function (v) { return [[0, v]]; };
   /* the old short names still work */
   var tween = change, go = change, on = fadeIn, off = fadeOut;
@@ -91,6 +215,17 @@
      curve overshoots; pull one below 0 and it winds up first. Solving for
      y given x needs a root find, so results are cached per curve — a clip
      calls this thirty times a second. */
+  /** bezier(x1, y1, x2, y2)   @track
+   *  Returns a custom easing defined by two control points, using the same
+   *  four numbers as the CSS cubic-bezier function.
+   *
+   *  y values above 1 cause the value to pass its target and return; y
+   *  values below 0 cause it to move backwards before moving forwards.
+   *
+   *  Placing the cursor inside a bezier() call opens the curve editor on it.
+   *  Dragging in the editor rewrites these numbers.
+   *  ex  scale: change(0, 340, 0.72, 1, bezier(0.34, 1.56, 0.64, 1))
+   */
   function bezier(x1, y1, x2, y2) {
     var A = function (a, b) { return 1 - 3*b + 3*a; };
     var B = function (a, b) { return 3*b - 6*a; };
@@ -124,6 +259,16 @@
      is smooth and every point is actually hit rather than approached.
 
      Cached per curve: a clip asks thirty times a second. */
+  /** curve([[x, y], [x, y], ...])   @track
+   *  Returns a custom easing that passes through the given points. x is
+   *  progress from 0 to 1 and y is the resulting value, where y above 1
+   *  passes the target and y below 0 moves backwards first.
+   *
+   *  Use this instead of bezier() when the shape needs more than two
+   *  control points. The curve editor opens on these as well; clicking
+   *  empty space in it adds a point and right-clicking one removes it.
+   *  ex  y: change(0, 600, 100, 0, curve([[0, 0], [0.4, 1.15], [0.7, 0.94], [1, 1]]))
+   */
   function curve(points) {
     var p = (points || []).slice().sort(function (a, b) { return a[0] - b[0]; });
     if (p.length < 2) return E.linear;
@@ -167,6 +312,14 @@
                     fontSize:1, letterSpacing:1, borderRadius:1, borderWidth:1 };
   var el = function (e) { return typeof e === 'string' ? D.getElementById(e) : e; };
 
+  /** anim(element, t, spec)   @move
+   *  Applies animated properties to a single element at time t. spec is an
+   *  object of property names to tracks.
+   *
+   *  element may be an id or an element. See Animatable properties for the
+   *  list of names accepted in spec.
+   *  ex  anim('title', t, { opacity: fadeIn(0, 300), y: change(0, 300, -60, 0, overshoot) });
+   */
   function anim(target, t, rawSpec) {
     var n = el(target);
     if (!n || !rawSpec) return n;
@@ -209,6 +362,27 @@
   /* ------------------------------------------------------------- stagger --
      opts: {from} delay before the first, {alt} flip y/x/r on odd items,
      {each} a function(i, n) returning extra spec for that item. */
+  /** stagger(list, t, gapMs, spec, options)   @move
+   *  Applies the same spec to every element in list, delaying each one by
+   *  gapMs more than the previous.
+   *
+   *    list     elements, usually from words() or chars()
+   *    gapMs    delay added per element
+   *    spec     the same object anim() takes
+   *    options  alt   reverses the direction of every second element. It
+   *                   negates x, y and rotation only, so it does nothing to a
+   *                   spec that animates just opacity or scale
+   *             from  delays the whole sequence by this many milliseconds
+   *             each  function (i, count) returning extra spec for element i
+   *
+   *  The cost of writing this does not grow with the number of elements,
+   *  which is the main difference from a node-based editor, where each
+   *  element needs its own node.
+   *  ex  stagger(words('l1', 'one two three'), t, 130, {
+   *  ex    opacity: fadeIn(0, 340),
+   *  ex    y: change(0, 340, -70, 0, overshoot)
+   *  ex  }, { alt: true });
+   */
   function stagger(list, t, gap, spec, opts) {
     opts = opts || {};
     var from = opts.from || 0;
@@ -231,6 +405,10 @@
     for (k in spec) out[ALIAS[k] || k] = spec[k];
     return out;
   }
+  /** merge(a, b)   @math
+   *  Returns a new object with the properties of a and b, where b takes precedence.
+   *  ex  merge(base, { top: 500 })
+   */
   function merge(a, b) { var o = {}, k; for (k in a) o[k] = a[k]; for (k in b) o[k] = b[k]; return o; }
 
   /* --------------------------------------------------------------- words --
@@ -254,7 +432,17 @@
     }
     return n.__p;
   }
+  /** words(id, text)   @type
+   *  Splits text into one element per word inside the element with the given
+   *  id, and returns the list. The split is performed once and reused, so it
+   *  is safe to call every frame. Pass the result to stagger().
+   *  ex  stagger(words('l1', 'one two three'), t, 130, { opacity: fadeIn(0, 300) });
+   */
   var words = function (a, b) { return split(a, b, 'words'); };
+  /** chars(id, text)   @type
+   *  As words(), but one element per character.
+   *  ex  stagger(chars('n', '3361'), t, 40, { y: change(0, 300, 40, 0, overshoot) });
+   */
   var chars = function (a, b) { return split(a, b, 'chars'); };
 
   /* ---------------------------------------------------------------- make --
@@ -279,13 +467,30 @@
     }
     return n;
   }
+  /** box(id, style, parentId)   @make
+   *  Creates an empty div and returns it. The element is created once per
+   *  id, so calling this every frame is expected and does not duplicate it.
+   *
+   *  style is an object of CSS properties. Numbers are treated as pixels.
+   *  ex  box('bar', { top: 900, left: 100, width: 400, height: 8, background: '#ffb02e' });
+   */
   function box(id, css, parent) { return mk('div', id, css, parent); }
+  /** img(id, src, style, parentId)   @make
+   *  Creates an image element. src is a path relative to the project folder;
+   *  imported files are under media/.
+   *  ex  img('shot', 'media/city.jpg', { top: 0, left: 0, width: 1080 });
+   */
   function img(id, src, css, parent) {
     var n = mk('img', id, css, parent);
     if (n.getAttribute('src') !== src) n.setAttribute('src', src);
     return n;
   }
   /* a centred line of type, which is most of what a kinetic clip contains */
+  /** label(id, text, style, parentId)   @make
+   *  Creates a text element without splitting or staggering it. Use line()
+   *  instead when the words should animate separately.
+   *  ex  label('cap', 'source: ONS', { top: 980, size: 40, opacity: 0.6 });
+   */
   function label(id, text, css, parent) {
     css = css || {};
     var n = mk('div', id, merge({ left: 0, right: 0, textAlign: 'center',
@@ -296,6 +501,10 @@
     return n;
   }
   /* the neon pill: dark glass, coloured rim and label, glow. Never a flat fill. */
+  /** pill(id, text, colour, style, parentId)   @make
+   *  Creates a rounded label with a background colour.
+   *  ex  pill('tag', 'LONDON', '#ffb02e', { top: 120, left: 80 });
+   */
   function pill(id, text, colour, css, parent) {
     var n = mk('div', id, merge({
       height: 130, borderRadius: 26, display: 'flex', alignItems: 'center',
@@ -314,6 +523,12 @@
      give the point you want centred and how close you are; it works out the
      transform. This is how a board or a pipeline beat is built: lay it out in
      plane coordinates once, then move the camera. */
+  /** camera(plane, t, spec)   @move
+   *  Animates a container element so that everything inside it moves
+   *  together. Lay elements out once using the parent option, then use this
+   *  to pan, zoom or tilt across them rather than animating each one.
+   *  ex  camera('board', t, { scale: change(0, 900, 1, 1.4, settle), x: change(0, 900, 0, -300) });
+   */
   function camera(target, t, spec) {
     var n = el(target);
     if (!n) return n;
@@ -335,6 +550,11 @@
      A stroke that draws itself on. Works on any SVG path: give it the element
      and a window, and it reveals along its own length. This is every
      connector, underline, strike and hand-drawn arrow. */
+  /** draw(path, t, startMs, endMs, easing)   @draw
+   *  Animates an SVG path so that its stroke is drawn on progressively
+   *  between two times. path is the id of an SVG path element.
+   *  ex  draw('underline', t, 300, 800, easeOut);
+   */
   function draw(target, t, a, b, e) {
     var n = el(target);
     if (!n || !n.getTotalLength) return n;
@@ -345,6 +565,11 @@
     return n;
   }
   /* a wipe, for things that are not paths */
+  /** wipe(element, t, startMs, endMs, widthPx, easing)   @draw
+   *  Reveals an element from left to right by animating a clip rectangle
+   *  across it. widthPx is the width to reveal.
+   *  ex  wipe('headline', t, 0, 500, 900);
+   */
   function wipe(target, t, a, b, width, e) {
     var n = el(target);
     if (!n) return n;
@@ -355,16 +580,33 @@
   /* ------------------------------------------------------------- placing --
      Where to put the i-th of n things. ring() uses the golden angle, so no
      visible rows and no two runs alike; grid() when you want rows. */
+  /** ring(i, count, radiusX, radiusY, centreX, centreY)   @place
+   *  Returns { x, y } for item i of count evenly spaced around an ellipse.
+   *  ex  var p = ring(i, 8, 300, 300, 540, 540);
+   */
   function ring(i, n, rx, ry, cx, cy) {
     var a = i * 2.39996 + 1.15;
     return { x: (cx === undefined ? 960 : cx) + Math.cos(a) * rx,
              y: (cy === undefined ? 540 : cy) + Math.sin(a) * (ry === undefined ? rx : ry) };
   }
+  /** grid(i, columns, cellW, cellH, x0, y0)   @place
+   *  Returns { x, y } for item i in a grid of the given column count and cell size.
+   *  ex  var p = grid(i, 4, 240, 240, 60, 400);
+   */
   function grid(i, cols, w, h, x0, y0) {
     return { x: (x0 || 0) + (i % cols) * w, y: (y0 || 0) + Math.floor(i / cols) * h };
   }
   /* deterministic pseudo-random — same i, same answer, every frame and every
      render. Math.random() in a __render is the classic way to break purity. */
+  /** rnd(i, seed)   @place
+   *  Returns a number between 0 and 1 that varies with i but is the same on
+   *  every call for the same i and seed.
+   *
+   *  Use this instead of Math.random, which would return a different value
+   *  on every frame and produce a different result each time the clip is
+   *  drawn.
+   *  ex  rotation: hold(-6 + rnd(i) * 12)
+   */
   function rnd(i, seed) {
     var x = Math.sin(i * 127.1 + (seed || 0) * 311.7) * 43758.5453;
     return x - Math.floor(x);
@@ -385,6 +627,77 @@
                 shadow:1, background:1, zIndex:1 };
   var TIMING = { gap:1, from:1, alt:1, each:1, parent:1 };
 
+
+
+
+
+  /** Appearance options   @option
+   *  Accepted by line(), block() and label(). These are fixed values, not
+   *  animated tracks.
+   *
+   *    top, left, right, width   position and width in stage pixels
+   *    size                      font size in pixels
+   *    color                     any CSS colour, for example '#ffb02e'
+   *    font                      font family name. Use the font picker above
+   *                              the code to insert the exact name
+   *    italic                    true or false
+   *    weight                    100 to 900
+   *    align                     'left', 'center' or 'right'
+   *    tracking                  letter spacing
+   *    leading                   line height
+   *    shadow                    any CSS text-shadow value
+   *    background                any CSS background value
+   *    zIndex                    stacking order within the clip
+   *  ex  line('l1', 'example text', t, {
+   *  ex    top: 340, size: 268, color: '#ffb02e',
+   *  ex    font: 'Fraunces 72pt Black', italic: true
+   *  ex  });
+   */
+
+  /** Animatable properties   @option
+   *  Any option that is not an appearance option is treated as an animated
+   *  property, and takes a track: change(), fadeIn(), fadeOut(), hold(), or
+   *  a list of keyframes.
+   *
+   *    opacity                       0 to 1
+   *    x, y, z                       offset in pixels from the laid-out position
+   *    scale, scaleX, scaleY         1 is unscaled
+   *    rotation, rotateX, rotateY    degrees
+   *    blur                          pixels
+   *    brightness, saturation        1 is unmodified
+   *
+   *  The transform properties are combined into one CSS transform and the
+   *  three filter properties into one CSS filter, so setting several of
+   *  them does not cause one to overwrite another.
+   *  ex  line('l1', 'example text', t, {
+   *  ex    top: 340, size: 268,
+   *  ex    opacity: fadeIn(0, 340),
+   *  ex    y: change(0, 340, -70, 0, overshoot),
+   *  ex    rotation: change(0, 340, -5, 0)
+   *  ex  });
+   */
+
+  /** Stagger options   @option
+   *  Accepted by line() and block() only. They control how the individual
+   *  words are offset from each other.
+   *
+   *    gap     milliseconds between each word starting. 0, the default,
+   *            moves them all together
+   *    from    delays the whole line by this many milliseconds
+   *    alt     reverses the direction of every second word, so they
+   *            alternate. It negates x, y and rotation only, and has no
+   *            effect on a line that animates just opacity or scale
+   *    parent  id of an element to place this inside, for use with camera()
+   *
+   *  For example, with y: change(0, 600, 100, 0) and alt: true, the first
+   *  word rises from below, the second drops from above, the third rises,
+   *  and so on.
+   *  ex  line('l1', 'three words here', t, {
+   *  ex    top: 340, size: 200,
+   *  ex    y: change(0, 600, 100, 0),
+   *  ex    gap: 130, from: 200, alt: true
+   *  ex  });
+   */
   function styleInto(css, o) {
     if (o.top !== undefined)   css.top = o.top;
     if (o.left !== undefined)  css.left = o.left;
@@ -404,6 +717,20 @@
     return css;
   }
 
+  /** line(id, text, t, options)   @type
+   *  Creates a text element, splits it into words, and animates the words in
+   *  sequence. Combines label(), words() and stagger() in one call.
+   *
+   *    id       a name of your choosing. The same id refers to the same
+   *             element, so calling this every frame reuses it rather than
+   *             creating a new one
+   *    text     the text to display
+   *    t        the clip time. Pass the variable t unchanged
+   *    options  appearance, animated properties and stagger options
+   *
+   *  Returns the list of word elements.
+   *  ex  line('l1', '3361 people', t, { top: 340, size: 268 });
+   */
   function line(id, text, t, o) {
     o = o || {};
     var css = {}, spec = {}, k;
@@ -413,24 +740,6 @@
       spec[k] = o[k];
     }
     styleInto(css, o);
-    if (false) {
-    if (o.top !== undefined)   css.top = o.top;
-    if (o.left !== undefined)  css.left = o.left;
-    if (o.right !== undefined) css.right = o.right;
-    if (o.width !== undefined) css.width = o.width;
-    if (o.size !== undefined)  css.fontSize = o.size;
-    if (o.color)    css.color = o.color;
-    if (o.font)     css.fontFamily = "'" + o.font + "', system-ui, sans-serif";
-    if (o.italic)   css.fontStyle = 'italic';
-    if (o.weight)   css.fontWeight = o.weight;
-    if (o.align)    css.textAlign = o.align;
-    if (o.tracking !== undefined) css.letterSpacing = o.tracking;
-    if (o.leading !== undefined)  css.lineHeight = o.leading;
-    if (o.shadow)   css.textShadow = o.shadow;
-    if (o.background) css.background = o.background;
-    if (o.zIndex !== undefined) css.zIndex = o.zIndex;
-    }
-
     label(id, '', css, o.parent);
     var parts = words(id, text);
     if (Object.keys(spec).length)
@@ -445,6 +754,11 @@
      separately, block() when the sentence should move as a unit — a scale on
      a block grows the whole line about its centre, where a scale on words
      grows each word about its own and the spacing stays put. */
+  /** block(id, text, t, options)   @type
+   *  As line(), but animates the text as a single element rather than word
+   *  by word. Use it when the line should move as one object.
+   *  ex  block('sub', 'every single day', t, { top: 620, size: 90, opacity: fadeIn(0, 300) });
+   */
   function block(id, text, t, o) {
     o = o || {};
     var css = {}, spec = {}, k;
@@ -457,6 +771,15 @@
   }
 
   /* ---------------------------------------------------------- house moves -- */
+  /** enter(element, t, atMs, options)   @move
+   *  Shorthand for a standard entrance at atMs: fades in and scales up with
+   *  an overshoot easing.
+   *
+   *    options  dur    length in milliseconds, default 340
+   *             scale  starting scale, default 0.8
+   *             x, y   starting offset in pixels
+   *  ex  enter('badge', t, 400, { y: 60 });
+   */
   function enter(target, t, at, o) {
     o = o || {}; at = at || 0;
     var dur = o.dur || 620;
@@ -469,6 +792,14 @@
     if (o.blur !== 0) spec.blur = change(at, at + dur * 0.6, o.blur || 16, 0, E.easeOut);
     return anim(target, t, spec);
   }
+  /** drift(element, t, startMs, endMs, options)   @move
+   *  Applies a slow continuous move between two times, so a static shot is
+   *  not completely still. Defaults to scaling up by 3.5%.
+   *
+   *    options  s   end scale
+   *             x, y, r, ry   end offset, rotation and Y rotation
+   *  ex  drift('bg', t, 0, 2200, { s: 1.06 });
+   */
   function drift(target, t, a, b, o) {
     o = o || {};
     var spec = { scale: change(a, b, 1, o.s === undefined ? 1.035 : o.s) };

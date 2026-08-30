@@ -120,7 +120,15 @@ export function bindKeys(actions = {}) {
   addEventListener('keydown', e => {
     const typing = e.target.closest('.CodeMirror')
       || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
+
+    /* These two work while typing as well. Needing to click out of the code
+       before you can look something up defeats the point of the reference
+       being in the editor. */
+    if (e.key === 'F1') { e.preventDefault(); actions.help?.(); return; }
+    if (e.key === 'Escape') { actions.escape?.(); return; }
+
     if (typing) return;
+    if (e.key === '?') { e.preventDefault(); actions.help?.(); return; }
     const shift = e.shiftKey;
     switch (e.key) {
       /* transport, the way an NLE does it */
