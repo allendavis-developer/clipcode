@@ -29,6 +29,7 @@ export function init(handlers = {}) {
   if (typeof CodeMirror !== 'undefined') {
     cm = CodeMirror.fromTextArea($('#code'), {
       mode: 'javascript', theme: 'material-darker', lineNumbers: true,
+      gutters: ['errors', 'CodeMirror-linenumbers'],
       indentUnit: 2, tabSize: 2, matchBrackets: true, autoCloseBrackets: true,
       styleActiveLine: true,
       extraKeys: {
@@ -54,9 +55,145 @@ export function init(handlers = {}) {
 const value = () => (cm ? cm.getValue() : $('#code').value);
 const setValue = v => { if (cm) cm.setValue(v); else $('#code').value = v; };
 
-export function showError(msg) {
-  $('#codeErr').textContent = msg || '';
-  $('#codeErr').classList.toggle('hidden', !msg);
+/* ---------------------------------------------------------------- errors -- */
+/* A missing comma should never read as "the clip did not finish loading".
+   It should read the way a code editor reads it: the line goes red, the exact
+   character gets a squiggle, and the message says what to do about it. */
+let marks = [];
+
+function clearMarks() {
+  marks.forEach(m => m.clear());
+  marks = [];
+  if (!cm) return;
+  cm.eachLine(h => {
+    cm.removeLineClass(h, 'background', 'errLine');
+    cm.removeLineClass(h, 'gutter', 'errGutter');
+  });
+  cm.clearGutter('errors');
+}
+
+/* Turn the engine's wording into something worth reading. Chrome tells you
+   what it choked ON; what you want to know is what is MISSING, which is
+   almost always on the line before the one it names. */
+function explain(raw, line, col) {
+  const text = String(raw).replace(/^Uncaught\s+/, '');
+  const prev = (cm && line > 1 ? cm.getLine(line - 2) : '') || '';
+  const here = (cm ? cm.getLine(line - 1) : '') || '';
+
+  if (/Unexpected identifier|Unexpected string|Unexpected number/.test(text)) {
+    if (/[^,{([\s]$/.test(prev.replace(/\/\/.*$/, '').trimEnd()))
+      return `${text} — looks like a missing comma at the end of line ${line - 1}.`;
+    return `${text} — a comma or an operator is probably missing just before it.`;
+  }
+  if (/Unexpected end of input/.test(text)) {
+    const open = count(here || '', '({[') - count(here || '', ')}]');
+    return `Unexpected end of input — a bracket is never closed`
+         + (open > 0 ? `, ${open} still open on this line.` : ' somewhere above.');
+  }
+  if (/Unexpected token '\}'|Unexpected token '\)'/.test(text))
+    return `${text} — either an extra comma before it, or a missing value after the last :`;
+  if (/Invalid or unexpected token/.test(text))
+    return `${text} — usually a quote that is never closed, or a smart quote pasted in.`;
+  if (/Unexpected token ':'/.test(text))
+    return `${text} — { } is needed around a list of name: value options.`;
+
+  const undef = /^(?:ReferenceError: )?(\w+) is not defined/.exec(text);
+  if (undef) {
+    const near = closest(undef[1]);
+    return `${undef[1]} is not defined`
+         + (near ? ` — did you mean ${near}?` : ' — check the spelling.');
+  }
+  const nofn = /(\w+) is not a function/.exec(text);
+  if (nofn) {
+    const near = closest(nofn[1]);
+    return `${nofn[1]} is not a function`
+         + (near ? ` — did you mean ${near}?` : '.');
+  }
+  if (/Cannot read propert/.test(text))
+    return `${text} — something that should be an element or an object is missing.`;
+  return text;
+}
+
+const count = (s, set) => [...s].filter(c => set.includes(c)).length;
+
+/* Nearest known name, by edit distance. "lien" -> "line" is the single most
+   common thing that goes wrong and it should not cost you a minute. */
+function closest(word) {
+  const names = Object.keys(SIGNATURES);
+  let best = null, score = 99;
+  for (const n of names) {
+    const d = distance(word.toLowerCase(), n.toLowerCase());
+    if (d < score) { score = d; best = n; }
+  }
+  /* One mistake in a short name, two in a long one. Looser than that and it
+     starts offering "wipe" for "nope", which is worse than saying nothing. */
+  return score <= (word.length > 4 ? 2 : 1) ? best : null;
+}
+
+/* Damerau, not plain Levenshtein: two letters swapped is ONE mistake, and
+   "lien" for "line" is the single most common typo there is. Plain edit
+   distance scores that as 2 and would refuse to suggest anything. */
+function distance(a, b) {
+  const d = [];
+  for (let i = 0; i <= a.length; i++) d[i] = [i];
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  return d[a.length][b.length];
+}
+
+export function showError(msg, where) {
+  clearMarks();
+  const strip = $('#codeErr');
+  if (!msg) { strip.textContent = ''; strip.classList.add('hidden'); return; }
+
+  /* the line the engine named, or the one already in the message */
+  let line = where && where.line, col = (where && where.col) || 0;
+  if (!line) { const m = /^line (\d+):/.exec(msg); if (m) line = Number(m[1]); }
+  const body = msg.replace(/^line \d+:\s*/, '');
+  const total = cm ? cm.lineCount() : 0;
+  if (line > total) line = total;              /* the shell's own tail */
+
+  const said = line ? explain(body, line, col) : body;
+  strip.textContent = line ? `line ${line} — ${said}` : said;
+  strip.classList.remove('hidden');
+  strip.onclick = () => {
+    if (!line || !cm) return;
+    cm.setCursor({ line: line - 1, ch: Math.max(0, col - 1) });
+    cm.focus();
+  };
+
+  if (!cm || !line || line < 1 || line > total) return;
+  const i = line - 1;
+  const handle = cm.getLineHandle(i);
+  cm.addLineClass(handle, 'background', 'errLine');
+  cm.addLineClass(handle, 'gutter', 'errGutter');
+
+  const dot = document.createElement('span');
+  dot.className = 'errDot';
+  dot.title = said;
+  dot.textContent = '\u25cf';
+  cm.setGutterMarker(i, 'errors', dot);
+
+  /* the squiggle: the token at the column, or the whole line if we have none */
+  const src = cm.getLine(i) || '';
+  let from = Math.max(0, Math.min(col ? col - 1 : 0, src.length - 1));
+  let to = from + 1;
+  if (col) {
+    while (from > 0 && /[\w$.]/.test(src[from - 1])) from--;
+    while (to < src.length && /[\w$.]/.test(src[to])) to++;
+  } else {
+    from = src.length - src.trimStart().length;
+    to = src.trimEnd().length;
+  }
+  if (to > from)
+    marks.push(cm.markText({ line: i, ch: from }, { line: i, ch: to },
+                           { className: 'errTok', title: said }));
 }
 export const openClip = () => clip;
 
@@ -294,7 +431,7 @@ export const refreshFonts = loadFonts;
 function hexNearCursor() {
   if (!cm) return null;
   const cur = cm.getCursor(), line = cm.getLine(cur.line) || '';
-  for (const m of line.matchAll(/#[0-9a-fA-F]{6}/g))
+  for (const m of line.matchAll(/#[0-9a-fA-F]{6}\b/g))
     if (cur.ch >= m.index - 1 && cur.ch <= m.index + m[0].length + 1) return m[0];
   return null;
 }
@@ -302,7 +439,7 @@ function hexNearCursor() {
 function replaceColour(hex) {
   if (!cm || !clip) return;
   const cur = cm.getCursor(), line = cm.getLine(cur.line) || '';
-  for (const m of line.matchAll(/#[0-9a-fA-F]{6}/g)) {
+  for (const m of line.matchAll(/#[0-9a-fA-F]{6}\b/g)) {
     if (cur.ch >= m.index - 1 && cur.ch <= m.index + m[0].length + 1) {
       cm.replaceRange(hex, { line: cur.line, ch: m.index },
                             { line: cur.line, ch: m.index + m[0].length });
@@ -395,7 +532,7 @@ function curveAt(line, ch) {
              innerFrom: m.index + m[0].indexOf('(') + 1,
              innerTo: outerTo - 1 };
   }
-  for (const m of line.matchAll(/([A-Za-z_$][\w$]*)/g)) {
+  for (const m of line.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)) {
     if (!Curve.NAMED[m[1]]) continue;
     const to = m.index + m[0].length;
     if (ch >= m.index && ch <= to)
@@ -405,6 +542,21 @@ function curveAt(line, ch) {
   return null;
 }
 
+/* How long the change this easing sits inside actually runs. Watching a 340ms
+   move at 340ms is the question you are actually asking; a generic one second
+   is not. Returns null when it is not inside one. */
+function enclosingSpan(line, at) {
+  const calls = /\b(change|go|tween|fadeIn|fadeOut|on|off)\s*\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)/g;
+  let best = null;
+  for (const m of line.matchAll(calls)) {
+    if (m.index > at) continue;             /* opens after us: not ours */
+    const a = Number(m[2]), b = Number(m[3]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) continue;
+    best = Math.round(b - a);                /* the innermost one that opened before */
+  }
+  return best;
+}
+
 function syncCurve() {
   if (!cm) return;
   if (Curve.isDragging()) return;        /* the drag owns the range until it lets go */
@@ -412,7 +564,10 @@ function syncCurve() {
   const found = curveAt(cm.getLine(cur.line) || '', cur.ch);
   if (!found) { curveSpot = null; return Curve.hide(); }
   curveSpot = { line: cur.line, ...found };
-  Curve.show(found.kind === 'curve' ? { points: found.points } : { values: found.values });
+  const ms = enclosingSpan(cm.getLine(cur.line) || '', found.outerFrom);
+  Curve.show(found.kind === 'curve'
+    ? { points: found.points, ms }
+    : { values: found.values, ms });
   /* an empty bezier() gets its default written in, so what the panel shows and
      what the clip runs are the same thing from the first frame */
   if (found.fill) writeCurve({ mode: 'bezier', values: found.values });

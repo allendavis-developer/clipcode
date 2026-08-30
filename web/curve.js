@@ -42,6 +42,14 @@ let pointList = [[0, 0], [0.4, 1.15], [0.7, 0.94], [1, 1]];
 let dragging = false;
 let previewRAF = null;
 
+/* The preview runs at the length of the change it is attached to when we can
+   tell — watching a 340ms move at 340ms is the actual question you are asking,
+   and a generic one second is not. The slider overrides it. */
+const DUR_KEY = 'studio.curvePreviewMs';
+let previewMs = Number(localStorage.getItem(DUR_KEY) || 0) || 1000;
+let previewOn = true;
+let attachedMs = null;
+
 export const isDragging = () => dragging;
 export const getMode = () => mode;
 
@@ -99,7 +107,13 @@ export function init(handlers = {}) {
 
       <div class="curveSide">
         <div class="curvePrev">
-          <div class="curveLabel">preview</div>
+          <div class="curveRow">
+            <span class="curveLabel">preview</span>
+            <button id="curvePlay" class="chip">pause</button>
+            <input id="curveDur" type="range" min="100" max="3000" step="50">
+            <span id="curveDurVal" class="mono"></span>
+            <button id="curveMatch" class="chip" title="match the change this easing is on">match</button>
+          </div>
           <div class="curveTrack"><div id="curveBall"></div></div>
         </div>
         <div class="curveLabel">library</div>
@@ -126,6 +140,25 @@ export function init(handlers = {}) {
 
   host.querySelector('#curveToPoints').onclick = toPoints;
   host.querySelector('#curveClose').onclick = hide;
+
+  const dur = host.querySelector('#curveDur');
+  dur.value = String(previewMs);
+  dur.addEventListener('input', () => {
+    previewMs = Number(dur.value);
+    try { localStorage.setItem(DUR_KEY, String(previewMs)); } catch {}
+    showDur();
+  });
+  host.querySelector('#curvePlay').onclick = () => {
+    previewOn = !previewOn;
+    host.querySelector('#curvePlay').textContent = previewOn ? 'pause' : 'play';
+  };
+  host.querySelector('#curveMatch').onclick = () => {
+    if (!attachedMs) return;
+    previewMs = Math.max(100, Math.min(3000, attachedMs));
+    dur.value = String(previewMs);
+    showDur();
+  };
+  showDur();
   bindSurface();
   draw();
   startPreview();
@@ -317,15 +350,33 @@ function splinePath(p) {
 /* ---------------------------------------------------------------- preview --
    The only honest test of an easing is watching something move with it, so a
    dot runs the curve on a loop, with a beat of stillness at each end. */
+function showDur() {
+  const el = host && host.querySelector('#curveDurVal');
+  if (!el) return;
+  el.textContent = (previewMs / 1000).toFixed(2) + 's'
+    + (attachedMs ? '' : '');
+  const match = host.querySelector('#curveMatch');
+  if (match) {
+    match.classList.toggle('hidden', !attachedMs);
+    match.textContent = attachedMs ? `match ${attachedMs}ms` : 'match';
+  }
+}
+
+/* One clock, its own, so pausing the preview does not pause anything else. */
 function startPreview() {
   const ball = host.querySelector('#curveBall');
   if (!ball) return;
-  const RUN = 1000, REST = 450;
+  const REST = 420;
+  let elapsed = 0, last = 0;
   const step = now => {
-    if (isOpen()) {
-      const cycle = (now % (RUN + REST)) / RUN;
-      const u = cycle >= 1 ? 1 : sampler()(cycle);
-      ball.style.left = (u * 100) + '%';
+    const dt = last ? now - last : 0;
+    last = now;
+    if (isOpen() && previewOn) {
+      elapsed = (elapsed + dt) % (previewMs + REST);
+      const u = elapsed >= previewMs ? 1 : sampler()(elapsed / previewMs);
+      /* travel the track's width MINUS the ball, so it sits inside at both
+         ends; overshoot past 1 is allowed to poke out, which is the point */
+      ball.style.left = 'calc(' + (u * 100) + '% - ' + (u * 16) + 'px)';
     }
     previewRAF = requestAnimationFrame(step);
   };
@@ -337,8 +388,10 @@ export function show(spec) {
   if (!host) return;
   if (spec && spec.points) { mode = 'curve'; pointList = spec.points.map(p => p.slice()); }
   else if (spec && spec.values) { mode = 'bezier'; pts = spec.values.slice(); }
+  if (spec && spec.ms !== undefined) attachedMs = spec.ms;
   host.classList.remove('hidden');
   draw();
+  showDur();
 }
 export function hide() { if (host) host.classList.add('hidden'); }
 export const isOpen = () => host && !host.classList.contains('hidden');

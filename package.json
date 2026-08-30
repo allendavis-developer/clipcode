@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node test.mjs"
+    "test": "node lint.mjs && node test.mjs",
+    "lint": "node lint.mjs"
   },
   "devDependencies": {
     "playwright": "^1.56.0"

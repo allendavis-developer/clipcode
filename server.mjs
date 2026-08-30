@@ -59,8 +59,17 @@ function fontFaces(projectName) {
   return out;
 }
 
+/* The wrapper around a clip, and the arithmetic that turns a line number in the
+   wrapper back into the line you actually typed.
+
+   That arithmetic used to be a hand-maintained constant. It was wrong the
+   moment anything above the user's code changed length — and since @font-face
+   rules go in that head, it changed with every project that has fonts. An
+   error pointed one line off is worse than an error pointed nowhere, so the
+   offset is now COUNTED from the head that was actually built. */
 function shell(js, w, h, faces) {
-  return `<!doctype html><meta charset="utf-8">
+  const head = `<!doctype html><meta charset="utf-8">
+<script>var SHELL_OFFSET = __OFFSET__;<\/script>
 <style>
 ${faces || ''}
   html,body{margin:0;background:transparent;overflow:hidden}
@@ -70,6 +79,17 @@ ${faces || ''}
 </style>
 <div id="stage"></div>
 <script src="/web/motion.js"></script>
+<script>
+/* Installed BEFORE the clip's own script. A syntax error is thrown while that
+   script is being PARSED, so a handler placed after it is never reached — which
+   is how a missing comma used to surface as "the clip did not finish loading"
+   with no line and no hint. From here it arrives with both. */
+window.onerror = function (msg, file, line, col) {
+  parent.postMessage({ studio: 'error', message: String(msg),
+                       line: Math.max(1, (line || 0) - SHELL_OFFSET),
+                       col: col || 0, src: location.pathname }, '*');
+};
+</script>
 <script>
 window.__stageW = ${w}; window.__stageH = ${h};
 var __dur = 3000;
@@ -83,7 +103,14 @@ function html(markup){
   var st = document.getElementById('stage');
   if (st.__html !== markup) { st.__html = markup; st.insertAdjacentHTML('beforeend', markup); }
 }
-window.__render = function (t, frame) {
+window.__render = function (t, frame) {`;
+
+  /* head's LAST line is the `window.__render = ...` line above. The clip's
+     first line is the one after it, so a reported line R is your line
+     R - offset. Count it; never assume it. */
+  const offset = head.split('\n').length;
+
+  return head.replace('__OFFSET__', String(offset)) + `
 ${js}
 };
 window.__duration = __dur;
@@ -111,19 +138,20 @@ window.__duration = __dur;
     .then(function () { return document.fonts.ready; })
     .then(go, go);
 })();
-<\/script>` + tail();
+<\/script>` + tail(offset);
 }
 
 /* Loaded in an iframe and driven by the editor, so it needs to say when it is
    ready and forward its own errors — with the line number offset back to what
    you actually typed, not where it landed inside the shell. */
-const SHELL_OFFSET = 22;
+const SHELL_OFFSET = 0;        /* html clips are not wrapped, so nothing to undo */
 function tail(offset) {
   return `
 <script>(function(){`
     + `var off=${offset === undefined ? SHELL_OFFSET : offset};`
-    + `window.onerror=function(m,f,l){parent.postMessage(`
-    + `{studio:'error',message:String(m),line:Math.max(1,l-off),src:location.pathname},'*');};`
+    + `if(!window.onerror)window.onerror=function(m,f,l,c){parent.postMessage(`
+    + `{studio:'error',message:String(m),line:Math.max(1,l-off),col:c||0,`
+    + `src:location.pathname},'*');};`
     + `var n=0;(function p(){`
     + `if(window.__ready)parent.postMessage({studio:'ready',src:location.pathname,`
     + `duration:window.__duration||0},'*');`

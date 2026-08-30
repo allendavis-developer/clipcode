@@ -28,7 +28,18 @@ function banner(msg) {
   el.textContent = msg || '';
   el.style.display = msg ? 'block' : 'none';
 }
-function fail(id, msg) { banner(msg); onError(id, msg); }
+/* A thrown error carries its own stack; the line in it is the line you typed
+   once the shell's offset is taken back off. The shell publishes that offset
+   itself — reading it from the page beats a constant here that would go stale
+   the moment the wrapper changed length. */
+function lineOf(e, w) {
+  const m = /<anonymous>:(\d+):(\d+)|:(\d+):(\d+)\)?$/m.exec(e && e.stack || '');
+  if (!m) return null;
+  const line = Number(m[1] || m[3]), col = Number(m[2] || m[4]);
+  const off = (w && w.SHELL_OFFSET) || 0;
+  return Number.isFinite(line) ? { line: Math.max(1, line - off), col } : null;
+}
+function fail(id, msg, where) { banner(msg); onError(id, msg, where); }
 
 export function fit() {
   const v = $('#viewer'), fitBox = $('#stageFit'), box = $('#stageBox');
@@ -73,7 +84,8 @@ addEventListener('message', ev => {
          playhead — which at a standstill means never. */
       invalidate();
     }
-    if (d.studio === 'error') fail(id, `line ${d.line}: ${d.message}`);
+    if (d.studio === 'error')
+      fail(id, `line ${d.line}: ${d.message}`, { line: d.line, col: d.col || 0 });
     if (d.studio === 'timeout') fail(id, 'the clip did not finish loading');
   }
 });
@@ -136,7 +148,7 @@ export async function paint(force = false) {
         const w = L.el.contentWindow;
         if (L.ready && w && w.__render) {
           try { await w.__render(local, qFrame(local)); banner(''); }
-          catch (e) { fail(c.id, e.message); }
+          catch (e) { fail(c.id, e.message, lineOf(e, w)); }
         }
       }
     }

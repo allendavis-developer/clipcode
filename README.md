@@ -13,7 +13,8 @@ PORT=5000 npm start                   if 4321 is taken
 STUDIO_PROJECTS=D:/videos npm start   keep projects somewhere else
 
 npm install                           once, for the tests (playwright)
-npm test                              drives the real app; needs it running
+npm test                              lint, then drive the real app; needs it running
+npm run lint                          source hygiene only, no browser needed
 ```
 
 No build step and no runtime dependencies — Node's own `http`, `fs` and
@@ -125,10 +126,13 @@ things it moves, and here it is flat.
 | `draw(path, t, a, b)` `wipe()` | strokes that draw themselves on |
 | `ring() grid() rnd(i)` | placement; `rnd` is deterministic, so purity survives |
 | `enter() drift()` | the house entrance, and the drift that never stops |
-| `on(a,b)` `off(a,b)` `go(a,b,v0,v1,e)` `hold(v)` | track shorthands |
+| `fadeIn(a,b)` `fadeOut(a,b)` `change(a,b,v0,v1,e)` `hold(v)` | track shorthands (`on` `off` `go` still work) |
 | `css()` `html()` | escape hatches when the helpers are not enough |
 
-Easings: `back out expo io soft into step linear`.
+Easings: `linear easeIn easeOut easeInOut snap overshoot settle hardCut`, or
+`bezier(x1,y1,x2,y2)` / `curve([[x,y],...])` for your own. Put the cursor inside
+either and the curve editor opens on it, with a preview you can pause and set to
+the length of the move it is attached to.
 
 A **track** is `[[time, value], [time, value, easing]]`, sampled at `t` and held
 outside its range. Every animated number in the system is one.
@@ -154,6 +158,55 @@ pane widths, timeline zoom.
 - **Cuts only** — no transitions.
 - Placing an element means typing coordinates; dragging it in the viewer and
   having that write back into the code is not built yet.
+- Errors are reported when the clip runs, not as you type. A syntax error shows
+  up about a second after you stop typing, not on the keystroke.
+
+---
+
+## When a clip is broken
+
+Nobody should spend a minute hunting for a missing comma. A broken clip:
+
+- **reddens the line** and puts a dot in the gutter,
+- **squiggles the exact character** the parser choked on,
+- says **what is missing**, not just what surprised it —
+  `line 3 — Unexpected identifier 'size' — looks like a missing comma at the
+  end of line 2`,
+- suggests the right name for a typo (`lien` → `did you mean line?`),
+  by Damerau distance, so two swapped letters count as one mistake,
+- shows the same message on the picture itself, since the viewer is where you
+  are looking when nothing appears.
+
+Clicking the message jumps the cursor to the character.
+
+Two things make this work, and both were once broken:
+
+**The error handler is installed before your code, not after.** A syntax error
+is thrown while the script is being *parsed*, so a handler placed below it is
+never reached. That is how a missing comma used to surface as "the clip did not
+finish loading", with no line and no hint.
+
+**The wrapper's height is counted, not typed.** A reported line is turned back
+into your line by subtracting the wrapper above it. That number was a constant
+of `22`; the wrapper is 36 lines, and grows further with every `@font-face` a
+project adds — so every error pointed at the wrong line. It is derived from the
+head that was actually built, and `SHELL_OFFSET` is published on the page so
+the parent uses the same number rather than a second copy of it.
+
+---
+
+## `node studio/lint.mjs`
+
+Runs in a second, before the browser suite. It looks for **control characters
+in source**, and it exists because five were found in this tree: a `\b` written
+through a shell heredoc arrived as a literal `0x08` backspace byte, so
+`/\bduration\(/` became `/<BS>duration\(/` — a regex that matches nothing,
+ever. The file parses. `node --check` passes. The eye sees `\b`. One feature is
+quietly dead.
+
+The general lesson: a corrupt byte inside a regex or a string literal is
+invisible to every check except one that looks at the bytes. So this looks at
+the bytes.
 
 ---
 

@@ -221,6 +221,10 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 
 .curveSide{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;padding-top:2px}
 .curveLabel{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.curveRow{display:flex;align-items:center;gap:7px;margin-bottom:3px}
+.curveRow .mono{color:var(--accent);font-size:11px;min-width:44px}
+#curveDur{flex:1;min-width:70px;max-width:180px;accent-color:var(--accent);height:14px}
+#curvePlay{min-width:44px}
 .curveTrack{position:relative;height:30px;background:var(--well);border:1px solid var(--line2);
   border-radius:3px;margin-bottom:4px}
 #curveBall{position:absolute;top:7px;width:16px;height:16px;border-radius:50%;
@@ -243,3 +247,20 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .curveTick{fill:#5a5a5a;font-size:9px;font-family:var(--mono)}
 #curveSvg{cursor:crosshair}
 #curveNums{color:var(--accent);margin-left:8px}
+
+
+/* --------------------------------------------------------- error marking --
+   A syntax error should look like a syntax error: the line reddens, the exact
+   token gets a squiggle, and a dot appears in the gutter. Nobody should ever
+   hunt for a missing comma. */
+.CodeMirror-gutter.errors { width: 12px; }
+.errDot { color: #ff5470; font-size: 10px; line-height: 1.6; padding-left: 3px; }
+.CodeMirror .errLine { background: rgba(255, 84, 112, .13) !important; }
+.CodeMirror .errGutter .CodeMirror-linenumber { color: #ff5470; font-weight: 600; }
+.CodeMirror .errTok {
+  text-decoration: underline wavy #ff5470;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+#codeErr { cursor: pointer; }
+#codeErr:hover { filter: brightness(1.25); }

@@ -35,9 +35,14 @@ await api('/api/project/new', 'POST', { name: P });
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+/* Errors thrown INSIDE a clip's iframe reach here too, and several checks
+   below deliberately break a clip to see what it reports. Those are the point,
+   not a failure — so the last check counts only errors nobody asked for. */
 const errors = [];
-page.on('pageerror', e => errors.push('page: ' + e.message));
-page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 120)); });
+let expected = false;
+const note = s => { if (!expected) errors.push(s); };
+page.on('pageerror', e => note('page: ' + e.message));
+page.on('console', m => { if (m.type() === 'error') note('console: ' + m.text().slice(0, 120)); });
 page.on('dialog', async d => d.accept('shot'));
 
 const clips = () => { try { return fs.readdirSync(path.join(dir, 'clips')); } catch { return []; } };
@@ -123,19 +128,62 @@ ok('the playhead graphic follows', x1 > x0 + 4, `${x0}px -> ${x1}px`);
 await seek(2000);
 ok('scrubbing moves the graphic', (await headX()) > x1, `${await headX()}px at 2s`);
 
-/* ---- a broken clip says why ---- */
+expected = true;             /* everything until the fix below is on purpose */
+/* ---- a broken clip says why, and says it ON the line ----
+
+   This block is the whole point of the error work. A missing comma must never
+   read as "the clip did not finish loading". It has to land on a line, put a
+   squiggle on the character, and say a sentence you can act on. */
 await type(`duration(3000);\nlien('x', 'oops', t, { top: 100 });`);
 const banner = await page.evaluate(() => {
   const e = document.querySelector('#stageErr');
   return e && e.style.display !== 'none' ? e.textContent : null;
 });
 ok('a broken clip reports itself', /not defined/.test(banner || ''), banner || 'nothing shown');
+
+const marks = () => page.evaluate(() => ({
+  strip:  document.querySelector('#codeErr').textContent,
+  line:   !!document.querySelector('.CodeMirror-linebackground.errLine'),
+  gutter: !!document.querySelector('.errGutter'),
+  dot:    !!document.querySelector('.errDot'),
+  tok:    (document.querySelector('.errTok') || {}).textContent || null
+}));
+
+let mk = await marks();
+ok('a typo suggests the right name', /did you mean line/.test(mk.strip), mk.strip);
+ok('the bad token is marked', mk.tok === 'lien' && mk.line && mk.gutter && mk.dot,
+   `tok=${mk.tok} line=${mk.line} gutter=${mk.gutter} dot=${mk.dot}`);
+
+/* the one that started all this */
+await type(`duration(3000);\nline('a', 'hi', t, { top: 300\n  size: 200 });`);
+mk = await marks();
+ok('a missing comma is named', /missing comma at the end of line 2/.test(mk.strip), mk.strip);
+ok('the comma squiggle is placed', mk.tok === 'size' && mk.line, `tok=${mk.tok}`);
+
+await type(`duration(3000);\nline('a', 'hi, t, { top: 300 });`);
+mk = await marks();
+ok('an unclosed quote is named', /quote that is never closed/.test(mk.strip), mk.strip);
+
+/* The line number must be EXACT, deep into a clip. It is produced by taking
+   the wrapper's height back off the reported line, and that height used to be
+   a hand-typed constant that was fourteen lines wrong — so every error pointed
+   at the wrong place. It is counted now; this is what proves it. */
+await type(`duration(3000);\n\n\nline('a', 'hi', t, { top: 300, size: 200 });\nnotAThing();`);
+mk = await marks();
+ok('the line number is exact', /^line 5 /.test(mk.strip), mk.strip);
+const off = await page.evaluate(() =>
+  document.querySelector('#stage iframe').contentWindow.SHELL_OFFSET);
+ok('the shell offset is derived', typeof off === 'number' && off > 0, `${off} lines of wrapper`);
 await type(`duration(3000);\nline('big', 'fixed', t, { top: 400, size: 200, o: on(0, 300) });`);
 const cleared = await page.evaluate(() => {
   const e = document.querySelector('#stageErr');
   return !e || e.style.display === 'none';
 });
 ok('the error clears when fixed', cleared);
+expected = false;
+const gone = await marks();
+ok('the marks clear too', !gone.line && !gone.dot && !gone.tok && !gone.strip,
+   JSON.stringify(gone));
 
 /* ---- duration drives the timeline ---- */
 await type(`duration(5200);\nline('big', 'fixed', t, { top: 400, size: 200, o: on(0, 300) });`);
@@ -182,6 +230,51 @@ await page.waitForTimeout(700);
 const removed = await page.textContent('#curveNums');
 ok('a point can be added', added === '6 points', added);
 ok('a point can be removed', removed === '5 points', removed);
+
+/* ---- the preview is yours to control ---- */
+const ballAt = () => page.evaluate(() => document.querySelector('#curveBall').style.left);
+const a0 = await ballAt();
+await page.waitForTimeout(300);
+ok('the preview runs', (await ballAt()) !== a0, 'the ball moves');
+
+await page.click('#curvePlay');
+await page.waitForTimeout(200);
+const held = await ballAt();
+await page.waitForTimeout(400);
+ok('the preview pauses', (await ballAt()) === held,
+   `${await page.textContent('#curvePlay')}, held at ${held}`);
+
+await page.click('#curvePlay');
+await page.waitForTimeout(200);
+const b0 = await ballAt();
+await page.waitForTimeout(300);
+ok('the preview restarts', (await ballAt()) !== b0, 'the ball moves again');
+
+await page.evaluate(() => {
+  const d = document.querySelector('#curveDur');
+  d.value = '2000';
+  d.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.waitForTimeout(250);
+ok('the preview length is adjustable', (await page.textContent('#curveDurVal')) === '2.00s',
+   await page.textContent('#curveDurVal'));
+
+/* The length it offers should be the length of the move it is attached to.
+   Watching a 340ms move at 340ms is the question you are actually asking. */
+await page.evaluate(() => {
+  const cm = document.querySelector('.CodeMirror').CodeMirror;
+  cm.setValue('duration(2200);\n'
+    + "line('a', 'x', t, { top: 300, size: 150,\n"
+    + '  scale: change(0, 340, .72, 1, bezier(0.34, 1.56, 0.64, 1)) });');
+  cm.setCursor({ line: 2, ch: 44 });
+});
+await page.waitForTimeout(900);
+ok('it offers the real length of the move',
+   /340ms/.test(await page.textContent('#curveMatch')), await page.textContent('#curveMatch'));
+await page.click('#curveMatch');
+await page.waitForTimeout(250);
+ok('matching sets that length', (await page.textContent('#curveDurVal')) === '0.34s',
+   await page.textContent('#curveDurVal'));
 
 ok('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 

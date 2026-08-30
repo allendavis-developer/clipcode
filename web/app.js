@@ -146,9 +146,9 @@ Editor.init({
 
 /* An error inside a clip belongs in the pane where you can fix it — but only
    for the clip you are actually looking at. */
-Stage.setErrorSink((id, msg) => {
+Stage.setErrorSink((id, msg, where) => {
   const open = Editor.openClip();
-  if (open && open.id === id) Editor.showError(msg);
+  if (open && open.id === id) Editor.showError(msg, where);
 });
 
 /* Dropping media on the timeline is the one gesture needing both the pool
