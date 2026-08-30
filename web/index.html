@@ -1,0 +1,112 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Studio</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<link rel="stylesheet" href="/web/studio.css">
+
+<div id="app">
+
+  <header id="bar">
+    <span class="brand">Studio</span>
+    <select id="project" class="sel"></select>
+    <button id="btnNewProject" class="btn">New project</button>
+    <span class="sep"></span>
+    <button id="btnImport" class="btn">Import media</button>
+    <button id="btnNewCode" class="btn">New code clip</button>
+    <span class="grow"></span>
+    <span id="saved" class="pill">saved</span>
+    <span id="live" class="pill">watching</span>
+  </header>
+
+  <main id="work">
+
+    <section id="poolPane">
+      <div class="paneHead"><span>Media pool</span><span class="grow"></span>
+        <span id="poolCount" class="hint"></span></div>
+      <div id="pool" class="list"></div>
+      <div id="poolDrop">drop files here to import</div>
+    </section>
+    <div class="gutter" id="gutterL"></div>
+
+    <!-- the program monitor: the picture, with its own controls under it -->
+    <section id="monitor">
+      <div id="viewer">
+        <div id="stageFit"><div id="stageBox"><div id="stage"></div></div></div>
+      </div>
+
+      <div id="scrub"><div id="scrubHead"></div></div>
+
+      <div id="mControls">
+        <div class="mSide">
+          <span id="tc" class="mono tcNow">00:00:00:00</span>
+          <span id="frameNo" class="mono dim">f0</span>
+        </div>
+
+        <div class="mMid">
+          <button class="tbtn" id="toStart" title="Go to start &mdash; Home">|&lt;</button>
+          <button class="tbtn" id="prevEdit" title="Previous edit &mdash; Up">&lt;&lt;</button>
+          <button class="tbtn" id="stepB" title="Back one frame &mdash; Left">&lt;|</button>
+          <button class="tbtn play" id="play" title="Play / pause &mdash; Space">&#9654;</button>
+          <button class="tbtn" id="stepF" title="Forward one frame &mdash; Right">|&gt;</button>
+          <button class="tbtn" id="nextEdit" title="Next edit &mdash; Down">&gt;&gt;</button>
+          <button class="tbtn" id="toEnd" title="Go to end &mdash; End">&gt;|</button>
+        </div>
+
+        <div class="mSide right">
+          <label class="chk" title="loop playback"><input type="checkbox" id="loop" checked> loop</label>
+          <span id="what" class="mono dim" title="what the viewer is showing right now">&mdash;</span>
+          <span id="fps" class="mono dim">&mdash;</span>
+          <span id="len" class="mono tcEnd">&mdash;</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="gutter" id="gutterR"></div>
+    <section id="codePane">
+      <div class="paneHead">
+        <span id="codeName">no clip selected</span><span class="grow"></span>
+        <input id="pickColour" class="mini swatch" type="color" value="#ffb02e"
+               title="colour — seeds from the hex nearest the cursor">
+        <select id="pickFont" class="mini"><option value="">font&hellip;</option></select>
+        <select id="presets" class="mini"><option value="">insert a move&hellip;</option></select>
+        <button id="btnSaveMove" class="btn mini">save move</button>
+        <span class="sep"></span>
+        <button id="zoomOut" class="btn mini" title="smaller text — Ctrl+-">A&minus;</button>
+        <button id="zoomIn" class="btn mini" title="larger text — Ctrl+=">A+</button>
+      </div>
+      <textarea id="code" spellcheck="false"></textarea>
+      <div id="sig" class="hidden"></div>
+      <div id="curve" class="hidden"></div>
+      <div id="codeErr" class="hidden"></div>
+    </section>
+
+  </main>
+
+  <div id="hGutter"></div>
+
+  <section id="timeline">
+    <div id="tlHead">
+      <div class="tlTools"><span id="sel" class="dim">nothing selected</span></div>
+      <div id="tlHeadRows"></div>
+    </div>
+    <div id="tlBody">
+      <div id="ruler"></div>
+      <div id="tracks"></div>
+      <div id="playhead"></div>
+    </div>
+  </section>
+
+</div>
+
+<input type="file" id="filePick" multiple hidden accept="video/*,image/*,audio/*">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<script type="module" src="/web/app.js"></script>

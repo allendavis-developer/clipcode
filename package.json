@@ -1,0 +1,14 @@
+{
+  "name": "clipcode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A video editor whose motion graphics are code instead of nodes",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

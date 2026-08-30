@@ -1,0 +1,5 @@
+# Projects are your work, not the tool's source: media, fonts and renders are
+# large and belong wherever you keep video, not in the tool's history.
+projects/
+presets.json
+node_modules/
