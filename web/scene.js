@@ -1166,7 +1166,13 @@
       path.setAttribute('d', d);
       path.__len = undefined;          /* the length changed with the shape */
     }
-    path.setAttribute('stroke', o.color || 'currentColor');
+    /* whatever .style() and .color() put on the node, so a wire can be hidden
+       or tinted the same way anything else can */
+    for (var k in n.css) {
+      var v = n.css[k];
+      path.style[k] = (typeof v === 'number' && k !== 'opacity') ? v + 'px' : v;
+    }
+    path.setAttribute('stroke', n.css.color || o.color || 'currentColor');
     path.setAttribute('stroke-width', o.width === undefined ? 6 : o.width);
     path.setAttribute('stroke-linecap', 'round');
     if (o.dash) path.setAttribute('stroke-dasharray', '18 14');

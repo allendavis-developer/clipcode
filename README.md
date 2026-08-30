@@ -80,6 +80,7 @@ projects/my-video/
   project.json     the media pool, the tracks, the clips. the edit.
   media/           what you imported — copied in, never linked
   clips/           one .js per code clip
+  lib/             code every clip in this project can call
 ```
 
 Media is **copied** on import. A pool full of paths into someone's Downloads is
@@ -267,6 +268,48 @@ turn up in someone else's checkout.
 
 Not saved, because it is not project data and not a preference either:
 playhead, selection, timeline zoom.
+
+---
+
+## Code shared between clips
+
+Anything in `projects/<name>/lib/*.js` is loaded into **every clip** in that
+project, before the clip's own code, so what it defines is simply in scope.
+Loaded in name order, so `01-base.js` can be relied on by `02-graph.js`.
+
+That answers the question a long video asks immediately: *a thing that comes
+back — a node map that gets extended, a lower third, a house entrance — should
+be written once and called from wherever it appears, not pasted into every clip
+that shows it.*
+
+```js
+// projects/myvideo/lib/graph.js
+function ideaMap(upTo) {
+  const spots = [['idea', 180, 240], ['script', 880, 420], ['edit', 1420, 760]];
+  ...
+  return made;
+}
+```
+
+```js
+// any clip
+const m = ideaMap(2);
+camera.focus(m[0], 500).hold(200).to(m[1], 600);
+```
+
+```js
+// a later clip — the same map, extended, no duplicated code
+const m = ideaMap(3);
+camera.focus(m[2], 500).pull(2.2, 700);
+```
+
+There are two ways a thing can persist across a video and they are not the
+same:
+
+- **Continuously, underneath** — one long clip on a low track, with cuts
+  stacked above it. It never stops and never resumes, because a clip is a pure
+  function of `t` and being covered is not a state.
+- **Coming back** — a shared function called from each clip that shows it.
 
 ---
 

@@ -68,7 +68,26 @@ function fontFaces(projectName) {
    rules go in that head, it changed with every project that has fonts. An
    error pointed one line off is worse than an error pointed nowhere, so the
    offset is now COUNTED from the head that was actually built. */
-function shell(js, w, h, faces) {
+/* Code a project shares between its clips.
+
+   The question this answers: a thing that comes back through a video — a node
+   map that gets extended, a lower third, a house entrance — should be written
+   once and called from wherever it appears, not pasted into every clip that
+   shows it. Anything in projects/<name>/lib/*.js is loaded into EVERY clip
+   before the clip's own code, so what it defines is simply in scope.
+
+   Loaded in name order, so 01-base.js can be relied on by 02-graph.js. */
+function sharedScripts(projectName) {
+  const dir = safeJoin(PROJECTS, projectName);
+  const ldir = dir && path.join(dir, 'lib');
+  if (!ldir || !fs.existsSync(ldir)) return '';
+  return fs.readdirSync(ldir).filter(f => f.endsWith('.js')).sort()
+    .map(f => `<script src="/p/${encodeURIComponent(projectName)}`
+             + `/lib/${encodeURIComponent(f)}?v=${Date.now()}"><\/script>`)
+    .join('\n');
+}
+
+function shell(js, w, h, faces, shared) {
   const head = `<!doctype html><meta charset="utf-8">
 <script>var SHELL_OFFSET = __OFFSET__;<\/script>
 <style>
@@ -91,6 +110,7 @@ ${faces || ''}
 <div id="stage"></div>
 <script src="/web/motion.js"></script>
 <script src="/web/scene.js"></script>
+${shared || ''}
 <script>
 /* Installed BEFORE the clip's own script. A syntax error is thrown while that
    script is being PARSED, so a handler placed after it is never reached — which
@@ -180,6 +200,7 @@ function tail(offset) {
 function inject(htmlSrc) {
   return `<script src="/web/motion.js"></script>
 <script src="/web/scene.js"></script>
+${shared || ''}
 ` + htmlSrc + tail(0);
 }
 
@@ -354,6 +375,30 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/clip/new' && req.method === 'POST')
     return sendJSON(res, 200, P.newCodeClip(body.name, body.title));
 
+  /* A shared file: code every clip in the project can call. Not on the
+     timeline and with no duration — it is a library, not a shot. */
+  if (p === '/api/lib/new' && req.method === 'POST') {
+    const ldir = safeJoin(PROJECTS, body.name);
+    if (!ldir || !fs.existsSync(ldir))
+      return sendJSON(res, 400, { ok: false, why: 'no such project' });
+    const base = String(body.file || 'shared').replace(/[^a-z0-9_-]+/gi, '-').toLowerCase();
+    const into = path.join(ldir, 'lib');
+    fs.mkdirSync(into, { recursive: true });
+    let file = base + '.js', n = 1;
+    while (fs.existsSync(path.join(into, file))) file = base + '-' + (++n) + '.js';
+    fs.writeFileSync(path.join(into, file), '');
+    return sendJSON(res, 200, { ok: true, src: 'lib/' + file });
+  }
+
+  if (p === '/api/lib') {
+    const pdir = safeJoin(PROJECTS, url.searchParams.get('name') || '');
+    const ldir = pdir && path.join(pdir, 'lib');
+    if (!ldir || !fs.existsSync(ldir)) return sendJSON(res, 200, { ok: true, files: [] });
+    return sendJSON(res, 200, { ok: true,
+      files: fs.readdirSync(ldir).filter(f => f.endsWith('.js')).sort()
+               .map(f => ({ name: f, src: 'lib/' + f })) });
+  }
+
   /* Deleting a clip deletes its file. Anything else means a name you used
      once is taken forever, and a clips/ folder that fills up with things you
      thought you had thrown away. The caller checks nothing else on the
@@ -432,7 +477,9 @@ const server = http.createServer(async (req, res) => {
       let js = '';
       try { js = fs.readFileSync(file, 'utf8'); }
       catch { res.writeHead(404); return res.end('not found'); }
-      const out = Buffer.from(shell(js, w, h, fontFaces(rest.slice(0, slash))), 'utf8');
+      const pname = rest.slice(0, slash);
+      const out = Buffer.from(
+        shell(js, w, h, fontFaces(pname), sharedScripts(pname)), 'utf8');
       res.writeHead(200, { 'content-type': MIME['.html'], 'content-length': out.length,
                            'cache-control': 'no-store' });
       return res.end(out);

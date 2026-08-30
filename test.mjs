@@ -477,6 +477,34 @@ ok('connect draws a wire between two things', w0 && w0.len > 100,
 ok('and it draws itself on', w0.undrawn === w0.len && w1.undrawn === 0,
    `${w0.undrawn} undrawn at 0ms, ${w1.undrawn} at 800ms`);
 
+/* ---- code shared between clips ----
+
+   A thing that comes back through a video should be written once and called
+   from wherever it appears. Without this, the only answer to "the map returns
+   in the next section, with one more branch" is to paste it again. */
+const libDir = path.join(dir, 'lib');
+fs.mkdirSync(libDir, { recursive: true });
+fs.writeFileSync(path.join(libDir, 'shared.js'),
+  'function twoWords(a, b) { return [text(a).size(90).at(200, 300),\n'
+  + '                                text(b).size(90).at(900, 500)]; }\n');
+await type(`duration(1200);
+const pair = twoWords('written', 'once');
+pair[0].enter(300, 'pop');
+pair[1].enter(300, 'pop').after(pair[0], 100);`);
+await page.waitForTimeout(900);
+const shared = await page.evaluate(() => {
+  const f = document.querySelector('#stage iframe');
+  f.contentWindow.__render(900, 0);
+  return [...f.contentDocument.querySelectorAll('#__world > *')]
+    .filter(e => e.tagName !== 'svg').map(e => e.textContent);
+});
+ok('a clip can call a function from the project lib',
+   shared.join(' ') === 'written once',
+   `${shared.join(', ')} — and the clip never defines twoWords`);
+ok('and it does not error', (await page.textContent('#codeErr')) === '',
+   await page.textContent('#codeErr'));
+fs.rmSync(libDir, { recursive: true, force: true });
+
 /* ---- the reference ----
 
    Its content comes out of the doc comments in motion.js, so these checks are
