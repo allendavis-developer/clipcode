@@ -579,16 +579,18 @@
   }
 
   /* -------------------------------------------------------------- camera --
-     A plane bigger than the frame, and a camera parked somewhere on it. You
-     give the point you want centred and how close you are; it works out the
-     transform. This is how a board or a pipeline beat is built: lay it out in
-     plane coordinates once, then move the camera. */
-  /** camera(plane, t, spec)   @move
-   *  Animates a container element so that everything inside it moves
-   *  together. Lay elements out once using the parent option, then use this
-   *  to pan, zoom or tilt across them rather than animating each one.
-   *  ex  camera('board', t, { scale: change(0, 900, 1, 1.4, settle), x: change(0, 900, 0, -300) });
-   */
+     Kept as an internal, and no longer exported.
+
+     It predates the scene layer's camera, which is a real one: a position in
+     the scene, depth, and parallax that falls out of the perspective. This is
+     only anim() on a container under another name, and while it was exported
+     it also SHADOWED that camera — scene.js puts the Camera object on
+     window.camera every frame, so `camera('plane', t, ...)` in a clip stopped
+     being a function call at all and started being an object.
+
+     Two things called camera, one of them winning silently, is worse than one
+     of them going away. Use camera.to() for a camera, or anim() on the
+     container when the move belongs to the board rather than to the shot. */
   function camera(target, t, spec) {
     var n = el(target);
     if (!n) return n;
@@ -896,7 +898,7 @@
   var API = { E:E, track:track, change:change, bezier:bezier, curve:curve,
               fadeIn:fadeIn, fadeOut:fadeOut, hold:hold, anim:anim,
               stagger:stagger, words:words, chars:chars, box:box, img:img,
-              label:label, pill:pill, camera:camera, draw:draw, wipe:wipe,
+              label:label, pill:pill, draw:draw, wipe:wipe,
               ring:ring, grid:grid, rnd:rnd, enter:enter, drift:drift, line:line, block:block,
               cl:cl, seg:seg, lp:lp, merge:merge };
   W.M = API;
