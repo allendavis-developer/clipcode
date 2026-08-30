@@ -182,7 +182,7 @@
     return this;
   };
 
-  /** .size(px)   @look
+  /** .size(fontSizePx)   @look
    *  Font size in pixels, when you are not also setting the family.
    *  ex  text('a note').size(90)
    */
@@ -207,7 +207,7 @@
    */
   P.weight = function (n) { this.css.fontWeight = n; return this; };
 
-  /** .center(y)   @look
+  /** .center(topPx)   @look
    *  Centres it across the stage, rather than placing its left edge. Give a y
    *  to set the vertical position at the same time.
    *  ex  text('3361 people').center(340)
@@ -260,14 +260,14 @@
 
   /* ------------------------------------------------------------ the time -- */
 
-  /** .start(ms)   @time
+  /** .start(atMs)   @time
    *  Start at an absolute time. Most of the time a relationship reads better;
    *  see .after().
    *  ex  title.enter(300).start(600)
    */
   P.start = function (ms) { this._rel = null; this._start = ms || 0; return this; };
 
-  /** .after(other, gap)   @time
+  /** .after(other, gapMs)   @time
    *  Start when `other` finishes, plus a gap in milliseconds. A negative gap
    *  overlaps them.
    *
@@ -293,7 +293,7 @@
     return this;
   };
 
-  /** .before(other, gap)   @time
+  /** .before(other, gapMs)   @time
    *  Start `gap` milliseconds before `other` starts.
    *  ex  glow.enter(400).before(title, 120)
    */
@@ -337,8 +337,12 @@
     return table[dflt];
   }
 
-  /** .enter(ms, how)   @motion
-   *  Bring it on. `how` is either the name of a preset or a spec of your own.
+  /** .enter(durationMs, how)   @motion
+   *  Bring it on. The first argument is HOW LONG the entrance takes, not when
+   *  it starts — when it starts is .start(), .after(), .with() or .before(),
+   *  and with none of those it starts at 0.
+   *
+   *  `how` is either the name of a preset or a spec of your own.
    *
    *    presets  fade  pop  rise  drop  slide  grow  spin
    *
@@ -354,7 +358,7 @@
     return this._add(ms === undefined ? 340 : ms, specOf(ENTER, how, 'pop'));
   };
 
-  /** .exit(ms, how)   @motion
+  /** .exit(durationMs, how)   @motion
    *  Take it off. Same presets and the same spec shape as .enter().
    *
    *  With no time of its own it follows whatever came before it, which is
@@ -365,13 +369,13 @@
     return this._add(ms === undefined ? 250 : ms, specOf(EXIT, how, 'fade'));
   };
 
-  /** .hold(ms)   @motion
+  /** .hold(durationMs)   @motion
    *  Do nothing for a while. Only useful between two other moves.
    *  ex  title.enter(300).hold(1200).exit(250)
    */
   P.hold = function (ms) { return this._add(ms || 0, {}); };
 
-  /** .move(to, ms, ease)   @motion
+  /** .move(to, durationMs, ease)   @motion
    *  Shift it. `to` is { x, y } in pixels, relative to where it sits.
    *  ex  card.move({ x: 240, y: -60 }, 500, 'easeInOut')
    */
@@ -383,7 +387,7 @@
     return this._add(ms === undefined ? 400 : ms, spec);
   };
 
-  /** .fade(from, to, ms, ease)   @motion
+  /** .fade(from, to, durationMs, ease)   @motion
    *  Opacity, from one value to another.
    *  ex  caption.fade(1, 0.3, 400)
    */
@@ -393,7 +397,7 @@
                                  to === undefined ? 1 : to], ease: ease });
   };
 
-  /** .scale(from, to, ms, ease)   @motion
+  /** .scale(from, to, durationMs, ease)   @motion
    *  ex  logo.scale(1, 1.15, 600, 'easeInOut')
    */
   P.scale = function (from, to, ms, ease) {
@@ -402,7 +406,7 @@
                                to === undefined ? 1 : to], ease: ease });
   };
 
-  /** .rotate(from, to, ms, ease)   @motion
+  /** .rotate(from, to, durationMs, ease)   @motion
    *  Degrees.
    *  ex  arrow.rotate(0, 90, 400, 'overshoot')
    */
@@ -411,7 +415,7 @@
                      { rotation: [from || 0, to || 0], ease: ease });
   };
 
-  /** .draw(ms, ease)   @motion
+  /** .draw(durationMs, ease)   @motion
    *  Draws an SVG path on, as if written by hand. For shape() paths.
    *  ex  chart.draw(600).after(subtitle, -120)
    */
@@ -419,7 +423,7 @@
     return this._add(ms === undefined ? 600 : ms, { __draw: true, ease: ease });
   };
 
-  /** .stagger(ms)   @group
+  /** .stagger(gapMs)   @group
    *  Delay each child of a group by this much more than the one before, so
    *  they cascade instead of arriving together.
    *  ex  items(['1M views', '50K likes', '12K comments']).stagger(80).enter(300, 'rise')

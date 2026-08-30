@@ -230,6 +230,23 @@ function card(e) {
 const esc = s => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+/* The argument names for the code pane's hint strip, taken from the same doc
+   comments this panel renders. Two maps, because a dotted call and a plain one
+   with the same name are different functions: .enter(ms, how) chains onto a
+   thing, and motion.js's enter(element, t, atMs, options) does not. Showing
+   one for the other is worse than showing nothing — it says the first argument
+   is a start time when it is a duration. */
+export function signatures() {
+  const dotted = {}, plain = {};
+  for (const e of entries) {
+    const m = /^(\.?)([\w$]+)\s*\(([^)]*)\)/.exec(e.sig);
+    if (!m) continue;
+    const params = m[3].split(',').map(x => x.trim()).filter(Boolean);
+    (m[1] ? dotted : plain)[m[2]] = params;
+  }
+  return { dotted, plain };
+}
+
 /* ------------------------------------------------------------------- open -- */
 export const isOpen = () => host && !host.classList.contains('hidden');
 export function show() {

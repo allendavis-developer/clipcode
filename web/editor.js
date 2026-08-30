@@ -14,6 +14,7 @@ import { S, $, markSaved } from './state.js';
 import { PRESETS } from './presets.js';
 import { SIGNATURES } from './signatures.js';
 import * as Curve from './curve.js';
+import * as Help from './help.js';
 
 const IDLE_MS = 700;
 
@@ -32,6 +33,8 @@ export function init(handlers = {}) {
       gutters: ['errors', 'CodeMirror-linenumbers'],
       indentUnit: 2, tabSize: 2, matchBrackets: true, autoCloseBrackets: true,
       styleActiveLine: true,
+      /* drawn by CodeMirror, not by the OS — see index.html */
+      scrollbarStyle: 'simple',
       extraKeys: {
         'Ctrl-S': apply, 'Cmd-S': apply,
         'Ctrl-=': () => zoom(1), 'Ctrl--': () => zoom(-1), 'Ctrl-0': () => zoom(0),
@@ -400,16 +403,29 @@ function initZoom() {
    unclosed bracket, takes the name in front of it, and counts the commas at
    depth 1 to know which argument you are on. Strings and nested calls are
    skipped so a comma inside them does not advance the highlight. */
+/* Which parameter names to show. A chained .enter(ms, how) and motion.js's
+   enter(element, t, atMs, options) are different functions that happen to
+   share a name, so the dot decides. Built from the reference, once. */
+let sceneSigs = null;
+function paramsFor(name, dotted) {
+  if (!sceneSigs) { try { sceneSigs = Help.signatures(); } catch { sceneSigs = null; } }
+  if (sceneSigs) {
+    const hit = dotted ? sceneSigs.dotted[name] : sceneSigs.plain[name];
+    if (hit) return hit;
+  }
+  return dotted ? null : SIGNATURES[name] || null;
+}
+
 function showSignature() {
   const bar = $('#sig');
   if (!bar || !cm) return;
   const cur = cm.getCursor();
   const line = cm.getLine(cur.line) || '';
   const info = callAt(line, cur.ch);
-  if (!info || !SIGNATURES[info.name]) return bar.classList.add('hidden');
-  const args = SIGNATURES[info.name];
+  const args = info && paramsFor(info.name, info.dotted);
+  if (!args) return bar.classList.add('hidden');
   bar.classList.remove('hidden');
-  bar.innerHTML = `<b>${info.name}</b>(`
+  bar.innerHTML = `<b>${info.dotted ? '.' : ''}${info.name}</b>(`
     + args.map((a, i) => i === info.arg ? `<span class="now">${a}</span>` : a).join(', ')
     + ')' + (args.length <= info.arg ? '<span class="note">extra argument</span>' : '');
 }
@@ -423,8 +439,8 @@ export function callAt(line, ch) {
     if (c === ')' || c === ']' || c === '}') depth++;
     else if (c === '(') {
       if (depth === 0) {
-        const before = line.slice(0, i).match(/([A-Za-z_$][\w$]*)\s*$/);
-        return before ? { name: before[1], arg: commas } : null;
+        const before = line.slice(0, i).match(/(\.?)([A-Za-z_$][\w$]*)\s*$/);
+        return before ? { name: before[2], dotted: !!before[1], arg: commas } : null;
       }
       depth--;
     } else if (c === ',' && depth === 0) commas++;

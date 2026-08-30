@@ -3,6 +3,7 @@
 <title>Studio</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/scroll/simplescrollbars.min.css">
 <link rel="stylesheet" href="/web/studio.css">
 
 <!-- Your pane sizes, applied before the first paint so the page does not
@@ -124,4 +125,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<!-- Scrollbars CodeMirror draws itself, as plain divs. Its default relies on
+     the browser painting a native one, which Windows 11 and Chromium both
+     hide until you are already scrolling: a file with ninety lines below the
+     fold looked exactly like a file that ended there. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/scroll/simplescrollbars.min.js"></script>
 <script type="module" src="/web/app.js"></script>

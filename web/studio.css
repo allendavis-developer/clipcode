@@ -322,3 +322,51 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
           color:#e8b84d;background:rgba(232,145,45,.10);
           border-top:1px solid rgba(232,145,45,.35)}
 #codeNote.hidden{display:none}
+
+
+/* ------------------------------------------------------------ scrollbars --
+   Always visible, and drawn by us.
+
+   Windows 11 and Chromium both use overlay scrollbars that hide until you are
+   already scrolling. In a code pane that means a file with ninety more lines
+   below the fold looks exactly like a file that ends there — no bar, no track,
+   no thumb, nothing to grab and nothing to read your position from. Scrolling
+   worked the whole time; there was just no sign that it could.
+
+   CodeMirror draws its own scrollbar as a plain overflow:scroll div, so it
+   picks these up along with every other scrolling pane in the app. */
+/* CodeMirror's own, drawn as divs and so always visible */
+.CodeMirror-simplescroll-vertical,
+.CodeMirror-simplescroll-horizontal { background: var(--well); z-index: 6; }
+.CodeMirror-simplescroll-vertical { width: 13px; border-left: 1px solid var(--line2); }
+.CodeMirror-simplescroll-horizontal { height: 13px; border-top: 1px solid var(--line2); }
+.CodeMirror-simplescroll-vertical div,
+.CodeMirror-simplescroll-horizontal div {
+  background: #5c5c5c; border: none; border-radius: 5px;
+  margin: 3px; box-sizing: border-box;
+}
+.CodeMirror-simplescroll-vertical div { width: 7px; }
+.CodeMirror-simplescroll-horizontal div { height: 7px; }
+.CodeMirror-simplescroll-vertical div:hover,
+.CodeMirror-simplescroll-horizontal div:hover { background: #7d7d7d; }
+.CodeMirror-simplescroll-vertical div:active,
+.CodeMirror-simplescroll-horizontal div:active { background: var(--accent); }
+
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--well); }
+::-webkit-scrollbar-thumb {
+  background: #3f3f3f; border-radius: 7px;
+  border: 3px solid var(--well);        /* inset, so the thumb reads as a bar */
+}
+::-webkit-scrollbar-thumb:hover { background: #565656; }
+::-webkit-scrollbar-thumb:active { background: var(--accent); }
+::-webkit-scrollbar-corner { background: var(--well); }
+* { scrollbar-color: #3f3f3f var(--well); }   /* firefox */
+
+/* The gutters sit against a different ground from the panes they scroll in. */
+#tlBody::-webkit-scrollbar-track,
+.list::-webkit-scrollbar-track { background: var(--panel); }
+#tlBody::-webkit-scrollbar-thumb,
+.list::-webkit-scrollbar-thumb { border-color: var(--panel); }
+#helpList::-webkit-scrollbar-track { background: var(--panel); }
+#helpList::-webkit-scrollbar-thumb { border-color: var(--panel); }
