@@ -452,6 +452,48 @@ ok('F1 works while typing code',
 await page.keyboard.press('Escape');
 await page.waitForTimeout(300);
 
+/* ---- the layout is yours and it stays ---- */
+const paneVars = () => page.evaluate(() => {
+  const s = getComputedStyle(document.documentElement);
+  return { pool: s.getPropertyValue('--pool').trim(),
+           mon: s.getPropertyValue('--mon').trim(),
+           tl: s.getPropertyValue('--h-timeline').trim() };
+});
+const dragGutter = async (sel, dx, dy) => {
+  const g = await page.locator(sel).boundingBox();
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2 + dx, g.y + g.height / 2 + dy, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+};
+await dragGutter('#gutterL', 120, 0);
+await dragGutter('#hGutter', 0, -120);
+const dragged = await paneVars();
+ok('dragging a splitter is remembered',
+   /^\{"--pool":"\d+px".*h-timeline/.test(
+     await page.evaluate(() => localStorage.getItem('studio.layout')) || ''),
+   await page.evaluate(() => localStorage.getItem('studio.layout')));
+
+await page.reload();
+await page.waitForTimeout(1400);
+const back = await paneVars();
+ok('and it survives a reload', back.pool === dragged.pool && back.tl === dragged.tl,
+   `${dragged.pool}/${dragged.tl} -> ${back.pool}/${back.tl}`);
+
+/* the inline restore runs before paint; if it did not, the page would render
+   at the stylesheet default and jump, which is the thing being prevented */
+ok('applied before the first paint', back.pool !== '210px', `${back.pool}, not the 210px default`);
+
+await page.dblclick('#gutterL');
+await page.waitForTimeout(300);
+const reset = await paneVars();
+const left = await page.evaluate(() => localStorage.getItem('studio.layout'));
+ok('double-click resets one and forgets it',
+   reset.pool === '210px' && reset.tl === dragged.tl && !/--pool/.test(left || ''),
+   `pool back to ${reset.pool}, timeline still ${reset.tl}`);
+await page.evaluate(() => localStorage.removeItem('studio.layout'));
+
 ok('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 await browser.close();

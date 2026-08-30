@@ -5,6 +5,16 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
 <link rel="stylesheet" href="/web/studio.css">
 
+<!-- Your pane sizes, applied before the first paint so the page does not
+     render at the default and then jump. It knows only the key; web/layout.js
+     owns what goes in it. -->
+<script>
+  try {
+    var L = JSON.parse(localStorage.getItem('studio.layout') || '{}');
+    for (var k in L) document.documentElement.style.setProperty(k, L[k]);
+  } catch (e) { /* private window, or nothing saved yet */ }
+</script>
+
 <div id="app">
 
   <header id="bar">

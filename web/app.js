@@ -21,6 +21,7 @@ import * as Pool from './pool.js';
 import * as Help from './help.js';
 import * as Curve from './curve.js';
 import { draggable, cursorDuring } from './drag.js';
+import * as Layout from './layout.js';
 
 async function api(url, method = 'GET', body) {
   const opt = { method };
@@ -228,11 +229,18 @@ function vSplit(gutter, pane, cssVar, min, max) {
       document.documentElement.style.setProperty(cssVar, w + 'px');
       TL.draw();
     },
-    end: (e, c) => c.restore()
+    end: (e, c) => {
+      c.restore();
+      /* on release, not on every move: the layout is where you settled */
+      Layout.remember(cssVar, getComputedStyle(document.documentElement)
+        .getPropertyValue(cssVar).trim());
+    }
   });
-  /* double-click puts it back to the stylesheet's default */
+  /* double-click puts it back to the stylesheet's default, and forgets the
+     override with it — otherwise it would return on the next load */
   gutter.addEventListener('dblclick', () => {
     document.documentElement.style.removeProperty(cssVar);
+    Layout.forget(cssVar);
     Stage.fit();
     TL.draw();
   });
@@ -247,10 +255,15 @@ draggable($('#hGutter'), {
     document.documentElement.style.setProperty('--h-timeline', h + 'px');
     TL.draw();
   },
-  end: (e, c) => c.restore()
+  end: (e, c) => {
+    c.restore();
+    Layout.remember('--h-timeline', getComputedStyle(document.documentElement)
+      .getPropertyValue('--h-timeline').trim());
+  }
 });
 $('#hGutter').addEventListener('dblclick', () => {
   document.documentElement.style.removeProperty('--h-timeline');
+  Layout.forget('--h-timeline');
   TL.draw();
 });
 

@@ -56,6 +56,7 @@ server.mjs              http routing, and nothing else
     editor.js           the code pane and a clip's source
     scene.js            the chained, choreography-first layer clips are written in
     help.js             the F1 reference, parsed out of scene.js and motion.js
+    layout.js           pane sizes, remembered per browser
     curve.js            the easing editor
     drag.js             the one drag primitive
     pool.js             media, and getting it into the project
@@ -228,8 +229,17 @@ writes its file 700 ms after you stop typing, on `Ctrl+S`, and on clicking out
 of the editor. Both flush on tab-hide and page-unload with `keepalive`, so the
 last keystroke before a close is not lost.
 
-Not saved, deliberately, because it is not project data: playhead, selection,
-pane widths, timeline zoom.
+Pane sizes are yours and they stay. Dragging a splitter writes `--pool`,
+`--mon` or `--h-timeline` to localStorage, and a small inline script in
+`index.html` applies them before the first paint so the page never renders at
+the default and then jumps. Double-clicking a gutter resets that one and
+forgets it. They live in localStorage rather than `project.json` because they
+describe the screen you are sitting at, not the video: the same project on a
+laptop and on a 32in monitor wants different panes, and your layout should not
+turn up in someone else's checkout.
+
+Not saved, because it is not project data and not a preference either:
+playhead, selection, timeline zoom.
 
 ---
 
