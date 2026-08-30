@@ -488,6 +488,31 @@
     return this._add(dur + hold, {});
   };
 
+  /** .along(path, durationMs, options)   @motion
+   *  Travel along a path() from one end to the other.
+   *
+   *    options  ease    default easeInOut
+   *             turn    true to point along the path as it goes
+   *             from    where on the path to start, 0 to 1, default 0
+   *             to      where to finish, default 1
+   *
+   *  The position is read off the real curve at every frame, so the thing
+   *  follows the shape exactly rather than approximating it, and reshaping the
+   *  path reroutes whatever travels on it.
+   *  ex  const route = path([[100, 800], [700, 300], [1500, 700]], { smooth: true });
+   *  ex  const dot = shape({ width: 40, height: 40, borderRadius: 20, background: '#ffb02e' });
+   *  ex  dot.along(route, 1400, { turn: true });
+   */
+  P.along = function (route, ms, o) {
+    o = o || {};
+    this.moves.push({ at: this._cursor, dur: ms === undefined ? 1000 : ms,
+                      ride: route, ease: o.ease || 'easeInOut',
+                      turn: !!o.turn, u0: o.from || 0,
+                      u1: o.to === undefined ? 1 : o.to });
+    this._cursor += (ms === undefined ? 1000 : ms);
+    return this;
+  };
+
   /** .stagger(gapMs)   @group
    *  Delay each child of a group by this much more than the one before, so
    *  they cascade instead of arriving together.
@@ -612,6 +637,9 @@
       return M.label(n.id, str, n.css, parentId);
     }
     if (n.kind === 'wire')  return wireEl(n, local);
+    if (n.kind === 'path')
+      return pathEl(n, n.opts.d !== undefined ? n.opts.d
+        : pathData(n.opts.pts, n.opts.o.smooth, n.opts.o.closed));
     if (n.kind === 'image') return M.img(n.id, n.opts.src, n.css, parentId);
     if (n.kind === 'shape') return M.box(n.id, n.css, parentId);
     return M.box(n.id, n.css, parentId);       /* group and items */
@@ -633,6 +661,26 @@
     var spec = {}, i, m, k;
     for (i = 0; i < n.moves.length; i++) {
       m = n.moves[i];
+      if (m.ride) {                             /* .along() */
+        var road = D.getElementById(m.ride.id);
+        if (road && road.getTotalLength) {
+          var len = road.getTotalLength();
+          var u = M.cl(M.seg(local, m.at, m.at + m.dur));
+          var eased = (typeof m.ease === 'string' ? (M.E[m.ease] || M.E.linear) : m.ease)(u);
+          var at = (m.u0 + (m.u1 - m.u0) * eased) * len;
+          var pt = road.getPointAtLength(at);
+          /* Positioned by its own centre, so a dot sits ON the line rather
+             than hanging below and to the right of it. */
+          var box = el.getBoundingClientRect();
+          spec.x = M.hold(pt.x - (n.css.left || 0) - (el.offsetWidth || 0) / 2);
+          spec.y = M.hold(pt.y - (n.css.top || 0) - (el.offsetHeight || 0) / 2);
+          if (m.turn) {
+            var ahead = road.getPointAtLength(Math.min(len, at + 1));
+            spec.rotation = M.hold(Math.atan2(ahead.y - pt.y, ahead.x - pt.x) * 180 / Math.PI);
+          }
+        }
+        continue;
+      }
       if (m.raw) {                              /* .animate() */
         spec[m.raw] = m.keys.map(function (f) { return [f[0], f[1], m.ease]; });
         continue;
@@ -759,11 +807,13 @@
        is not a detail, it is the difference between a diagram and a pile of
        lines at the origin. */
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].parent || nodes[i].kind === 'wire') continue;
+      if (nodes[i].parent || nodes[i].kind === 'wire'
+          || nodes[i].kind === 'path') continue;
       applyNode(nodes[i], t, 0);
     }
     for (i = 0; i < nodes.length; i++) {
-      if (nodes[i].parent || nodes[i].kind !== 'wire') continue;
+      if (nodes[i].parent) continue;
+      if (nodes[i].kind !== 'wire' && nodes[i].kind !== 'path') continue;
       applyNode(nodes[i], t, 0);
     }
     for (i = 0; i < nodes.length; i++) end = Math.max(end, nodes[i].endsAt());
@@ -1110,6 +1160,99 @@
     return { x: box.x + dx * k, y: box.y + dy * k };
   }
 
+  /* Points to SVG path data. Straight through them, or a Catmull-Rom spline
+     converted to cubic beziers, which is the curve that passes THROUGH its
+     control points rather than near them — the one a person means when they
+     say "curve it through here". */
+  function pathData(pts, smooth, closed) {
+    if (!pts || pts.length < 2) return '';
+    var p = pts.map(function (q) { return { x: q[0], y: q[1] }; });
+    if (!smooth) {
+      return 'M' + p.map(function (q) { return q.x + ' ' + q.y; }).join(' L ')
+           + (closed ? ' Z' : '');
+    }
+    var wrap = function (i) {
+      return closed ? p[(i + p.length) % p.length]
+                    : p[Math.max(0, Math.min(p.length - 1, i))];
+    };
+    var d = 'M' + p[0].x + ' ' + p[0].y;
+    var last = closed ? p.length : p.length - 1;
+    for (var i = 0; i < last; i++) {
+      var p0 = wrap(i - 1), p1 = wrap(i), p2 = wrap(i + 1), p3 = wrap(i + 2);
+      d += ' C ' + (p1.x + (p2.x - p0.x) / 6) + ' ' + (p1.y + (p2.y - p0.y) / 6)
+         + ', ' + (p2.x - (p3.x - p1.x) / 6) + ' ' + (p2.y - (p3.y - p1.y) / 6)
+         + ', ' + p2.x + ' ' + p2.y;
+    }
+    return d + (closed ? ' Z' : '');
+  }
+
+  /** path(points, options)   @make
+   *  A vector shape of your own: a list of [x, y] points, straight through
+   *  them or curved through them. This is the free-form one — an underline, an
+   *  arrow, a chart line, a blob, a route for something to travel along.
+   *
+   *    options  smooth  true curves THROUGH the points rather than cornering
+   *             closed  true joins the last point back to the first
+   *             color   stroke colour, default the current text colour
+   *             width   stroke width, default 6
+   *             fill    a fill colour; default none, so it is a line
+   *             glow    true for a halo in the stroke colour
+   *             dash    true, or a CSS dash array like '18 14'
+   *             cap     'round' (default), 'butt' or 'square'
+   *
+   *  Chain .draw(ms) and it writes itself on end to end, which is the same
+   *  trim-path move a vector app gives you.
+   *  ex  path([[200, 800], [600, 500], [1000, 620], [1500, 300]], { smooth: true })
+   *  ex    .draw(900);
+   *  ex  path([[100, 100], [300, 100], [300, 300], [100, 300]], { closed: true, fill: '#ffb02e' });
+   */
+  function path(points, o) {
+    o = o || {};
+    var n = new Node('path', { pts: points || [], o: o });
+    return n;
+  }
+
+  /** raw(d, options)   @make
+   *  The same thing, given as SVG path data, for when you already have the
+   *  curve or want commands points cannot express. Same options as path().
+   *  ex  raw('M100 500 C 400 200, 800 800, 1200 400', { width: 8 }).draw(700);
+   */
+  function raw(d, o) {
+    var n = new Node('path', { d: d, o: o || {} });
+    return n;
+  }
+
+  /* One builder for both, and for wires, since all three are a styled path on
+     the wire plane. */
+  function pathEl(n, geometry) {
+    var svg = wirePlane();
+    if (!svg) return null;
+    var el = D.getElementById(n.id);
+    if (!el) {
+      el = D.createElementNS(SVGNS, 'path');
+      el.id = n.id;
+      svg.appendChild(el);
+    }
+    var o = n.opts.o || {};
+    if (geometry && el.getAttribute('d') !== geometry) {
+      el.setAttribute('d', geometry);
+      el.__len = undefined;              /* the length changed with the shape */
+    }
+    el.setAttribute('fill', o.fill || 'none');
+    el.setAttribute('stroke', n.css.color || o.color || 'currentColor');
+    el.setAttribute('stroke-width', o.width === undefined ? 6 : o.width);
+    el.setAttribute('stroke-linecap', o.cap || 'round');
+    el.setAttribute('stroke-linejoin', 'round');
+    if (o.dash) el.setAttribute('stroke-dasharray', o.dash === true ? '18 14' : o.dash);
+    el.style.filter = o.glow
+      ? 'drop-shadow(0 0 16px ' + (n.css.color || o.color || '#fff') + ')' : '';
+    for (var k in n.css) {
+      var v = n.css[k];
+      el.style[k] = (typeof v === 'number' && k !== 'opacity') ? v + 'px' : v;
+    }
+    return el;
+  }
+
   /** connect(from, to, options)   @make
    *  A line between two things, which is how a set of elements becomes a
    *  diagram. Chain .draw(ms) and it writes itself on from one end to the
@@ -1135,24 +1278,20 @@
   }
 
   function wireEl(n, local) {
-    var svg = wirePlane();
-    if (!svg) return null;
-    var path = D.getElementById(n.id);
-    if (!path) {
-      path = D.createElementNS(SVGNS, 'path');
-      path.id = n.id;
-      path.setAttribute('fill', 'none');
-      svg.appendChild(path);
-    }
     var o = n.opts.o || {};
     var a = D.getElementById(n.opts.from && n.opts.from.id);
     var b = D.getElementById(n.opts.to && n.opts.to.id);
-    if (!a || !b) return path;
+    if (!a || !b) return pathEl(n, null);
 
     var ca = centreOf(a), cb = centreOf(b);
     var p1 = edgePoint(ca, cb), p2 = edgePoint(cb, ca);
     var d;
-    if (o.curve) {
+    /* Waypoints: the free-form case. The wire still finds its own ends on the
+       two boxes, and goes wherever you send it in between. */
+    if (o.via && o.via.length) {
+      d = pathData([[p1.x, p1.y]].concat(o.via).concat([[p2.x, p2.y]]),
+                   o.smooth !== false, false);
+    } else if (o.curve) {
       /* bow it out perpendicular to the run, so the amount is a proportion of
          the distance rather than a number you have to retune per pair */
       var mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
@@ -1162,22 +1301,7 @@
     } else {
       d = 'M' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
     }
-    if (path.getAttribute('d') !== d) {
-      path.setAttribute('d', d);
-      path.__len = undefined;          /* the length changed with the shape */
-    }
-    /* whatever .style() and .color() put on the node, so a wire can be hidden
-       or tinted the same way anything else can */
-    for (var k in n.css) {
-      var v = n.css[k];
-      path.style[k] = (typeof v === 'number' && k !== 'opacity') ? v + 'px' : v;
-    }
-    path.setAttribute('stroke', n.css.color || o.color || 'currentColor');
-    path.setAttribute('stroke-width', o.width === undefined ? 6 : o.width);
-    path.setAttribute('stroke-linecap', 'round');
-    if (o.dash) path.setAttribute('stroke-dasharray', '18 14');
-    path.style.filter = o.glow ? 'drop-shadow(0 0 16px ' + (o.color || '#fff') + ')' : '';
-    return path;
+    return pathEl(n, d);
   }
 
   /** captions([[text, ms], ...])   @make
@@ -1323,7 +1447,8 @@
 
   var API = { text: text, image: image, shape: shape,
               group: group, items: items, sequence: sequence,
-              captions: captions, stack: stack, connect: connect };
+              captions: captions, stack: stack, connect: connect,
+              path: path, raw: raw };
   W.SCENE = API;
   for (var k in API) W[k] = API[k];
 })(window, document);

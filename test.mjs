@@ -477,6 +477,36 @@ ok('connect draws a wire between two things', w0 && w0.len > 100,
 ok('and it draws itself on', w0.undrawn === w0.len && w1.undrawn === 0,
    `${w0.undrawn} undrawn at 0ms, ${w1.undrawn} at 800ms`);
 
+/* ---- shapes of your own, and travelling along them ---- */
+await type(`duration(3000);
+const line = path([[120, 820], [520, 420], [1000, 640], [1500, 260]],
+  { smooth: true, width: 10 });
+line.draw(900);
+const dot = shape({ width: 42, height: 42, background: '#ff3b8f' }).at(0, 0);
+dot.along(line, 1200).after(line, 0);
+const a = text('here').size(70).at(160, 140);
+const b2 = text('there').size(70).at(1300, 120);
+connect(a, b2, { via: [[500, 40], [900, 260]] }).draw(600);`);
+const rideAt = async ms => page.evaluate(t => {
+  const f = document.querySelector('#stage iframe');
+  f.contentWindow.__render(t, 0);
+  const d = f.contentDocument;
+  const dot = [...d.querySelectorAll('#__world > *')]
+    .find(e => e.tagName === 'DIV' && !e.textContent);
+  const m = dot ? new DOMMatrix(getComputedStyle(dot).transform) : null;
+  return { paths: [...d.querySelectorAll('#__wires path')].map(p => Math.round(p.getTotalLength())),
+           x: m ? Math.round(m.e) : null, y: m ? Math.round(m.f) : null };
+}, ms);
+const r0 = await rideAt(900), r1 = await rideAt(1500), r2 = await rideAt(2100);
+ok('a path curves through the points you give it',
+   r0.paths.length === 2 && r0.paths[0] > 1500,
+   `${r0.paths[0]}px through four points — a straight run would be ~1450`);
+ok('a connector can be shaped by hand', r0.paths[1] > 1000,
+   `${r0.paths[1]}px via two waypoints`);
+ok('and a thing can travel along a path',
+   r0.x < r1.x && r1.x < r2.x && r2.x > 1400 && r2.y < 300,
+   `x ${r0.x} -> ${r1.x} -> ${r2.x}, ending at y=${r2.y} near the last point (1500, 260)`);
+
 /* ---- code shared between clips ----
 
    A thing that comes back through a video should be written once and called

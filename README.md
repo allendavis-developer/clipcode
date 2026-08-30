@@ -169,7 +169,10 @@ create inside an `if` changes what everything after it refers to.
 | | |
 |---|---|
 | `text() image() shape()` | make one thing |
-| `connect(a, b, {curve, glow})` | a line between two things — chain `.draw(ms)` and it writes itself on |
+| `connect(a, b, {curve, via, glow})` | a line between two things; `via` sends it through waypoints |
+| `path([[x,y],...], {smooth, closed, fill})` | a vector shape of your own — curved through the points or cornered |
+| `raw('M100 500 C ...')` | the same, as SVG path data |
+| `.along(path, ms, {turn})` | travel a path, optionally pointing the way |
 | `group(a, b) items([...]) sequence(a, b, c)` | make several |
 | `.font() .size() .color() .at() .style() .layout()` | how it looks |
 | `.enter() .exit() .hold() .move() .fade() .scale() .rotate() .draw()` | what it does |
