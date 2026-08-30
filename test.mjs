@@ -450,6 +450,33 @@ ok('a camera drift is linear and never settles',
    Math.max(...steps) - Math.min(...steps) < 0.002,
    drifts.map(d => d.toFixed(3)).join(' -> '));
 
+/* A line between two things is what turns a set of elements into a diagram,
+   and diagrams are most of what this kind of video is made of. */
+await type(`duration(3000);
+const a = text('idea').size(80).at(180, 240);
+const b = text('script').size(80).at(880, 420);
+a.enter(300, 'pop');
+b.enter(300, 'pop').after(a, 400);
+connect(a, b, { glow: true }).draw(420).after(a, 60);`);
+const wireAt = async ms => {
+  await page.evaluate(t => {
+    document.querySelector('#stage iframe').contentWindow.__render(t, 0);
+  }, ms);
+  await page.waitForTimeout(130);
+  return page.evaluate(() => {
+    const p = document.querySelector('#stage iframe')
+      .contentDocument.querySelector('#__wires path');
+    if (!p) return null;
+    return { len: Math.round(p.getTotalLength()),
+             undrawn: Math.round(parseFloat(p.style.strokeDashoffset || 0)) };
+  });
+};
+const w0 = await wireAt(0), w1 = await wireAt(800);
+ok('connect draws a wire between two things', w0 && w0.len > 100,
+   w0 ? `${w0.len}px long` : 'no wire');
+ok('and it draws itself on', w0.undrawn === w0.len && w1.undrawn === 0,
+   `${w0.undrawn} undrawn at 0ms, ${w1.undrawn} at 800ms`);
+
 /* ---- the reference ----
 
    Its content comes out of the doc comments in motion.js, so these checks are

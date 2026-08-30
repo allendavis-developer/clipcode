@@ -611,6 +611,7 @@
       var str = n.opts.textAt ? n.opts.textAt(local === undefined ? 0 : local) : n.opts.text;
       return M.label(n.id, str, n.css, parentId);
     }
+    if (n.kind === 'wire')  return wireEl(n, local);
     if (n.kind === 'image') return M.img(n.id, n.opts.src, n.css, parentId);
     if (n.kind === 'shape') return M.box(n.id, n.css, parentId);
     return M.box(n.id, n.css, parentId);       /* group and items */
@@ -753,8 +754,16 @@
       } catch (e) { /* not in a frame */ }
     }
     var end = 0;
+    /* Things first, then wires. A wire measures the boxes it joins, and a box
+       that has not been laid out yet measures as nothing — so the order here
+       is not a detail, it is the difference between a diagram and a pile of
+       lines at the origin. */
     for (var i = 0; i < nodes.length; i++) {
-      if (nodes[i].parent) continue;            /* children are drawn by their group */
+      if (nodes[i].parent || nodes[i].kind === 'wire') continue;
+      applyNode(nodes[i], t, 0);
+    }
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i].parent || nodes[i].kind !== 'wire') continue;
       applyNode(nodes[i], t, 0);
     }
     for (i = 0; i < nodes.length; i++) end = Math.max(end, nodes[i].endsAt());
@@ -1066,6 +1075,105 @@
 
   /* ------------------------------------------------------------- making -- */
 
+  /* ---------------------------------------------------------------- wire -- */
+  /* One SVG plane inside the world holds every wire, so they share a
+     coordinate system with the things they join and travel with the camera. */
+  var WIRES = '__wires';
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  function wirePlane() {
+    var w = worldEl();
+    if (!w) return null;
+    var svg = D.getElementById(WIRES);
+    if (!svg) {
+      svg = D.createElementNS(SVGNS, 'svg');
+      svg.id = WIRES;
+      svg.setAttribute('width', W_ || 1920);
+      svg.setAttribute('height', H_ || 1080);
+      svg.style.cssText = 'position:absolute;left:0;top:0;overflow:visible;pointer-events:none';
+      /* first child, so wires sit behind the things they join */
+      w.insertBefore(svg, w.firstChild);
+    }
+    return svg;
+  }
+
+  /* Where a line from one box to another should leave and arrive: the point on
+     each box's edge facing the other, so a wire touches its endpoints instead
+     of starting in the middle of the text. */
+  function edgePoint(box, towards) {
+    var dx = towards.x - box.x, dy = towards.y - box.y;
+    if (!dx && !dy) return { x: box.x, y: box.y };
+    var hw = box.w / 2 + 8, hh = box.h / 2 + 8;
+    var sx = dx ? hw / Math.abs(dx) : Infinity;
+    var sy = dy ? hh / Math.abs(dy) : Infinity;
+    var k = Math.min(sx, sy);
+    return { x: box.x + dx * k, y: box.y + dy * k };
+  }
+
+  /** connect(from, to, options)   @make
+   *  A line between two things, which is how a set of elements becomes a
+   *  diagram. Chain .draw(ms) and it writes itself on from one end to the
+   *  other.
+   *
+   *    options  color   any CSS colour, default the current text colour
+   *             width   stroke width in px, default 6
+   *             curve   0 is straight; 0.4 bows it out, -0.4 bows it back
+   *             glow    true for a soft halo in the same colour
+   *             dash    true for a dashed line
+   *
+   *  It measures its two ends every frame, so the wire follows them if they
+   *  move, and it lives in the same plane as they do, so the camera carries it
+   *  along with everything else.
+   *  ex  const a = text('idea').size(70).at(200, 300);
+   *  ex  const b = text('script').size(70).at(900, 500);
+   *  ex  connect(a, b, { curve: 0.3, glow: true }).draw(500).after(a, 120);
+   */
+  function connect(from, to, o) {
+    o = o || {};
+    var n = new Node('wire', { from: from, to: to, o: o });
+    return n;
+  }
+
+  function wireEl(n, local) {
+    var svg = wirePlane();
+    if (!svg) return null;
+    var path = D.getElementById(n.id);
+    if (!path) {
+      path = D.createElementNS(SVGNS, 'path');
+      path.id = n.id;
+      path.setAttribute('fill', 'none');
+      svg.appendChild(path);
+    }
+    var o = n.opts.o || {};
+    var a = D.getElementById(n.opts.from && n.opts.from.id);
+    var b = D.getElementById(n.opts.to && n.opts.to.id);
+    if (!a || !b) return path;
+
+    var ca = centreOf(a), cb = centreOf(b);
+    var p1 = edgePoint(ca, cb), p2 = edgePoint(cb, ca);
+    var d;
+    if (o.curve) {
+      /* bow it out perpendicular to the run, so the amount is a proportion of
+         the distance rather than a number you have to retune per pair */
+      var mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+      var vx = p2.x - p1.x, vy = p2.y - p1.y;
+      d = 'M' + p1.x + ' ' + p1.y + ' Q ' + (mx - vy * o.curve) + ' '
+        + (my + vx * o.curve) + ' ' + p2.x + ' ' + p2.y;
+    } else {
+      d = 'M' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
+    }
+    if (path.getAttribute('d') !== d) {
+      path.setAttribute('d', d);
+      path.__len = undefined;          /* the length changed with the shape */
+    }
+    path.setAttribute('stroke', o.color || 'currentColor');
+    path.setAttribute('stroke-width', o.width === undefined ? 6 : o.width);
+    path.setAttribute('stroke-linecap', 'round');
+    if (o.dash) path.setAttribute('stroke-dasharray', '18 14');
+    path.style.filter = o.glow ? 'drop-shadow(0 0 16px ' + (o.color || '#fff') + ')' : '';
+    return path;
+  }
+
   /** captions([[text, ms], ...])   @make
    *  The subtitle channel: small text at the bottom of frame that changes card
    *  by card and runs independently of everything else.
@@ -1209,7 +1317,7 @@
 
   var API = { text: text, image: image, shape: shape,
               group: group, items: items, sequence: sequence,
-              captions: captions, stack: stack };
+              captions: captions, stack: stack, connect: connect };
   W.SCENE = API;
   for (var k in API) W[k] = API[k];
 })(window, document);

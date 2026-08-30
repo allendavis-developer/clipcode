@@ -168,6 +168,7 @@ create inside an `if` changes what everything after it refers to.
 | | |
 |---|---|
 | `text() image() shape()` | make one thing |
+| `connect(a, b, {curve, glow})` | a line between two things — chain `.draw(ms)` and it writes itself on |
 | `group(a, b) items([...]) sequence(a, b, c)` | make several |
 | `.font() .size() .color() .at() .style() .layout()` | how it looks |
 | `.enter() .exit() .hold() .move() .fade() .scale() .rotate() .draw()` | what it does |
