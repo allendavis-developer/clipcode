@@ -112,6 +112,18 @@ window.__renderInfo = () => ({
   problems: problems.slice()
 });
 
+/* Render at a finer temporal grid than the project's own.
+
+   Every part of the pipeline quantises time to a frame — the transport does it
+   so that what you scrub is what you render, and stage.js does it again when
+   it paints. Fighting that to get a sub-frame sample would mean a second
+   definition of "what time is it", and the two would drift.
+
+   So instead of asking for time between frames, this makes the frames finer.
+   Setting the rate to fps x samples means the sub-samples ARE frames, quantise
+   correctly, and are exactly what the picture was at each instant. */
+window.__renderRate = (fps) => { S.stage.fps = fps; };
+
 window.__renderReady = async () => {
   if (!loaded) return false;
   await document.fonts.ready;
@@ -119,8 +131,17 @@ window.__renderReady = async () => {
   return await settle();
 };
 
-/* One frame. Time is quantised the same way the transport quantises it, so
-   frame 900 here is the frame the playhead calls 900. */
+/* One frame.
+
+   Time is quantised the same way the transport quantises it, so frame 900 here
+   is the frame the playhead calls 900 — a preview that interpolated between
+   frames would be a different picture from the render, and a lie.
+
+   Motion blur therefore does not ask for un-quantised time; it raises the
+   quantiser instead. See __renderRate below — a blurred frame is the average
+   of several renders taken across one frame's interval, which IS rendering at
+   a higher frame rate and averaging down, so the honest way to get the
+   sub-samples is to make them real frames. */
 window.__renderSeek = async (ms) => {
   S.t = qTime(qFrame(ms));
   Stage.invalidate();

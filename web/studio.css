@@ -249,6 +249,32 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 #curveNums{color:var(--accent);margin-left:8px}
 
 
+/* the shape editor — the shape of the FRAME, because a point written as
+   (960, 540) has to look like the middle of the picture */
+#pathedit{flex:0 0 auto;background:#191919;border-top:1px solid var(--line2);padding:0 0 6px}
+.pathHead{display:flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;
+  font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--line2)}
+#pathNums{color:var(--accent);margin-left:8px}
+.pathBody{display:flex;justify-content:center;padding:6px 10px 2px}
+#pathSvg{height:220px;width:auto;max-width:100%;background:#0b0b0b;
+  border:1px solid var(--line);cursor:crosshair}
+.pathFrame{fill:none;stroke:#3a3a3a;stroke-width:1;vector-effect:non-scaling-stroke}
+.pathThird{stroke:#242424;stroke-width:1;vector-effect:non-scaling-stroke}
+.pathCentre{stroke:#4a4a4a;stroke-width:1;vector-effect:non-scaling-stroke}
+.pathShape{stroke-linecap:round;stroke-linejoin:round}
+.pathProbe{fill:none;stroke:none;pointer-events:none}
+.pathDot{fill:#e8912d;stroke:#141414;cursor:grab}
+.pathDot.first{fill:#4a90c4}
+.pathDot:hover{stroke:#fff}
+
+.pathTools{display:flex;align-items:center;gap:6px;padding:4px 10px 0;flex-wrap:wrap}
+.pathLabel{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+#pathWidth{width:96px;accent-color:var(--accent);height:14px}
+#pathWidthVal{color:var(--accent);font-size:11px;min-width:34px}
+.chip.on{border-color:var(--accent);color:var(--accent);background:#e8912d1a}
+.pathHint{text-align:center;font-size:11px;color:var(--faint);padding-top:4px}
+
+
 /* --------------------------------------------------------- error marking --
    A syntax error should look like a syntax error: the line reddens, the exact
    token gets a squiggle, and a dot appears in the gutter. Nobody should ever
@@ -374,6 +400,48 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 
 /* The waveform sits behind the clip's name, at the bottom of the block, so the
    label stays readable over it. */
+/* ----------------------------------------------------------- transitions --
+   A boundary with a transition has to be tellable from one without at a
+   glance, and its length has to be readable without clicking anything. So the
+   block is drawn at the head of the incoming clip, where the transition
+   actually happens, with the bowtie every NLE has used for thirty years and
+   the length written across it. Its right edge is the handle.
+
+   The colours are the four kinds, so a whip and a dissolve are not the same
+   grey rectangle at a zoom where neither can show its name. */
+.tx-dissolve{--tx:#5aa9e6} .tx-dip{--tx:#8f8f8f}
+.tx-push{--tx:#6fbf73}     .tx-whip{--tx:#e8912d}
+.tx-pending{--tx:#ffffff}
+
+.clip .tx{position:absolute;left:0;top:0;bottom:0;pointer-events:none;overflow:hidden;
+  border-right:1px solid var(--tx);
+  background:
+    linear-gradient(to bottom right,transparent calc(50% - 1px),var(--tx) 50%,transparent calc(50% + 1px)),
+    linear-gradient(to top right,transparent calc(50% - 1px),var(--tx) 50%,transparent calc(50% + 1px)),
+    linear-gradient(90deg,color-mix(in srgb,var(--tx) 42%,transparent),
+                          color-mix(in srgb,var(--tx) 14%,transparent))}
+.clip .tx .txn{position:absolute;left:3px;right:9px;top:50%;transform:translateY(-50%);
+  font-family:var(--mono);font-size:9.5px;line-height:1;color:#fff;
+  text-shadow:0 1px 2px #000c;white-space:nowrap;overflow:hidden}
+/* wider than a trim handle because it sits on top of one and is the smaller
+   target of the two */
+.clip .tx .txh{position:absolute;right:0;top:0;bottom:0;width:9px;
+  pointer-events:auto;cursor:ew-resize}
+.clip .tx .txh:hover{background:#ffffff44}
+.clip.hasTx{border-left-color:var(--tx,#5aa9e6)}
+.clip.txTarget{box-shadow:inset 0 0 0 2px var(--accent)}
+.clip.txMaking{opacity:.85}
+
+/* the palette in the toolbar, and the thing that follows the cursor off it */
+#txBar{display:flex;align-items:center;gap:4px}
+.txChip{border:1px solid var(--tx);border-radius:2px;padding:1px 6px;font-size:11px;
+  color:var(--ink);cursor:grab;user-select:none;
+  background:color-mix(in srgb,var(--tx) 22%,transparent)}
+.txChip:hover{background:color-mix(in srgb,var(--tx) 40%,transparent)}
+.txGhost{position:fixed;z-index:999;pointer-events:none;transform:translate(-50%,-50%);
+  border:1px solid var(--tx);border-radius:2px;padding:1px 6px;font-size:11px;color:#fff;
+  background:color-mix(in srgb,var(--tx) 70%,#000)}
+
 .clip .cw{position:absolute;left:0;bottom:0;pointer-events:none;opacity:.9}
 .clip.audio{background:#243447;border-color:#3a5573}
 .clip.audio .cn{color:#9fc4ea}

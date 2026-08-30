@@ -59,6 +59,7 @@ server.mjs              http routing, and nothing else
     help.js             the F1 reference, parsed out of scene.js and motion.js
     layout.js           pane sizes, remembered per browser
     curve.js            the easing editor
+    pathedit.js         the shape editor
     drag.js             the one drag primitive
     pool.js             media, and getting it into the project
     motion.js           the lower level scene.js is built on
@@ -242,6 +243,17 @@ Easings: `linear easeIn easeOut easeInOut snap overshoot settle hardCut`, or
 either and the curve editor opens on it, with a preview you can pause and set to
 the length of the move it is attached to.
 
+A **shape is a mouse job for the same reason an easing is.** Put the cursor
+inside a `path([[x, y], ...])` — or a `raw('M...')`, which is sampled into
+points — and the shape editor opens on it, drawn at the stage's own aspect and
+in the stage's own coordinates, so a point at (960, 540) is visibly the middle
+of the frame. Drag a point and the numbers in your code are rewritten as you
+drag; click empty space to add one, right-click one to remove it, and set
+`smooth`, `closed`, colour, width and fill from the panel. An option it has no
+control for — a `glow`, a `dash`, a colour written as an expression — is handed
+back exactly as it was typed. On an empty line the **shape** button writes a
+starter call and opens on that, rather than telling you to go and type one.
+
 The earlier names have been removed. `go` `tween` `on` `off` and the easings
 `back out into io expo soft step` each raise an error naming their replacement
 (`change` `change` `fadeIn` `fadeOut`, `overshoot easeOut easeIn easeInOut snap
@@ -337,7 +349,37 @@ purity rule buys, and a clip that breaks it shows up here as a render that
 disagrees with the preview.
 
 `--scale 0.5` renders the same composition at half the pixels for a quick
-draft. Playwright is a devDependency and ffmpeg is expected on PATH; neither is
+draft.
+
+### Motion blur
+
+```
+node studio/render.mjs myvideo --blur 180
+node studio/render.mjs myvideo --blur 180 --samples 16
+```
+
+Real accumulation blur: each frame is the **average of several renders taken
+across the time the shutter would have been open**, which is what a film camera
+does and what After Effects means by motion blur. 180° is the film standard —
+the shutter open for half of each frame's interval — and the exposure is centred
+on the frame's own moment, so the blur straddles it rather than trailing it.
+
+This is the purity rule paying out. Because `__render(t)` is a pure function of
+`t`, a sub-sample can simply be *asked for* and it is exactly what the picture
+was at that instant. So **everything** gets blurred at once and correctly — the
+camera, a stagger, text riding a path, a wire drawing itself on — with no
+per-object velocity to estimate and nothing to opt in.
+
+Measured on a box crossing frame in one second, one scanline through it: 1
+partially-lit pixel without blur, **35 with**.
+
+The sub-samples are taken by raising the render's frame rate to
+`fps × samples`, not by asking for time between frames. Every part of the
+pipeline quantises time to a frame — the transport so that what you scrub is
+what you render, and the compositor again when it paints — and fighting that
+would mean a second definition of "what time is it". Since a blurred frame *is*
+several frames averaged, the honest move is to make the sub-samples real
+frames. Playwright is a devDependency and ffmpeg is expected on PATH; neither is
 needed to *run* the editor, which still has no runtime dependencies at all.
 
 ---
@@ -385,7 +427,8 @@ paid on every edit, so it gets its own design:
 
 - **Cuts only** — no transitions.
 - Placing an element means typing coordinates; dragging it in the viewer and
-  having that write back into the code is not built yet.
+  having that write back into the code is not built yet. A `path()`'s points
+  are draggable — that is the shape editor — but a text or an image is not.
 - Errors are reported when the clip runs, not as you type. A syntax error shows
   up about a second after you stop typing, not on the keystroke.
 

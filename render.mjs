@@ -50,6 +50,9 @@ if (!project) {
     --to MS       stop here (default the end of the last clip)
     --scale K     render at K times the stage size — 0.5 for a quick draft
     --crf N       quality, lower is better, 18 is visually lossless (default 18)
+    --blur DEG    motion blur, as a shutter angle. 180 is the film standard,
+                  0 is off (default). 360 blurs across the whole frame
+    --samples N   sub-frames averaged per output frame (default 8)
     --keep-frames leave the png frames on disk next to the mp4
 `);
   process.exit(1);
@@ -57,6 +60,25 @@ if (!project) {
 const out = path.resolve(loose[1] || path.join(HERE, 'renders', project + '.mp4'));
 const scale = Number(flags.scale || 1);
 const crf = String(flags.crf || 18);
+
+/* ------------------------------------------------------------ motion blur --
+   Real accumulation blur, not a directional smear applied afterwards: each
+   output frame is the average of several renders taken across the time the
+   shutter would have been open.
+
+   This is the payoff of the purity rule. Because __render(t) is a pure
+   function of t, a sub-frame at t + 2.1ms can simply be ASKED FOR, and it is
+   exactly what the picture was at that instant. Everything gets it at once and
+   correctly — the camera, a stagger, text on a path, a wire drawing itself on
+   — with no per-object velocity to estimate and nothing to opt in.
+
+   Shutter angle is the film convention: 180 degrees means the shutter is open
+   for half of each frame's interval, which is what a film camera does and what
+   After Effects defaults to. The exposure is centred on the frame's own time,
+   so the blur straddles the moment rather than trailing it. */
+const shutter = Number(flags.blur || 0);
+const samples = Math.max(2, Math.min(64, Number(flags.samples || 8)));
+const blurring = shutter > 0;
 
 /* ------------------------------------------------------------------ tools */
 function have(cmd) {
@@ -124,8 +146,14 @@ await page.setViewportSize({ width: info.w, height: info.h });
 
 const frames = Math.max(1, Math.round(((to - from) / 1000) * fps));
 console.log(`  ${info.w}x${info.h} @ ${fps}fps${scale !== 1 ? ` x${scale}` : ''}`
+  + (blurring ? `   ${shutter}° shutter, ${samples} samples/frame` : '')
   + `   ${(from / 1000).toFixed(2)}s to ${(to / 1000).toFixed(2)}s`
   + `   ${frames} frames   ${info.clips} clip(s)\n`);
+
+/* A blurred frame is the average of `samples` renders across one frame's
+   interval, so the page has to quantise time on that finer grid or every
+   sub-sample snaps to the same instant and averages a picture with itself. */
+if (blurring) await page.evaluate(r => window.__renderRate(r), fps * samples);
 
 process.stdout.write('  waiting for clips and fonts…');
 const ready = await page.evaluate(() => window.__renderReady());
@@ -155,8 +183,20 @@ const silent = audioClips.length ? out.replace(/\.[^.]+$/, '') + '.silent.mp4' :
 
 /* Frames go in over stdin as a png stream, so nothing large is ever written
    to disk unless you ask for it. */
+/* With blur on, sub-frames arrive at samples x the rate and tmix averages each
+   group of them; the select keeps the last of every group, which is the one
+   whose window is the whole group. Without blur this is a plain passthrough. */
+const inRate = fps * (blurring ? samples : 1);
 const args = [
-  '-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', '-',
+  '-y', '-f', 'image2pipe', '-framerate', String(inRate), '-i', '-',
+  ...(blurring
+    /* setpts rebuilds the timestamps after the select, because the frames
+       that survive it are one in every `samples` and their original stamps
+       are at the sub-frame rate. Asking -r to fix that instead silently
+       duplicates frames. */
+    ? ['-vf', `tmix=frames=${samples},select='not(mod(n+1\\,${samples}))',`
+            + `setpts=N/(${fps}*TB)`, '-r', String(fps)]
+    : []),
   '-c:v', 'libx264', '-preset', 'medium', '-crf', crf,
   '-pix_fmt', 'yuv420p', '-movflags', '+faststart', silent
 ];
@@ -170,15 +210,26 @@ if (keepDir) fs.mkdirSync(keepDir, { recursive: true });
 const started = Date.now();
 const problems = new Set();
 
+const perFrame = blurring ? samples : 1;
+const interval = 1000 / fps;
+
 for (let i = 0; i < frames; i++) {
-  const t = from + (i * 1000) / fps;
-  const r = await page.evaluate(ms => window.__renderSeek(ms), t);
-  for (const pr of r.problems) problems.add(pr);
+  const t = from + i * interval;
 
-  const png = await page.screenshot({ type: 'png' });
-  if (keepDir) fs.writeFileSync(path.join(keepDir, String(i).padStart(6, '0') + '.png'), png);
+  for (let j = 0; j < perFrame; j++) {
+    /* centred on t: the shutter opens before the frame's moment and closes
+       after it, rather than the blur trailing the position */
+    const at = blurring
+      ? t + (((j + 0.5) / samples) - 0.5) * (shutter / 360) * interval
+      : t;
+    const r = await page.evaluate(ms => window.__renderSeek(ms), at);
+    for (const pr of r.problems) problems.add(pr);
 
-  if (!ff.stdin.write(png)) await new Promise(res => ff.stdin.once('drain', res));
+    const png = await page.screenshot({ type: 'png' });
+    if (keepDir && j === 0)
+      fs.writeFileSync(path.join(keepDir, String(i).padStart(6, '0') + '.png'), png);
+    if (!ff.stdin.write(png)) await new Promise(res => ff.stdin.once('drain', res));
+  }
 
   if (i % 5 === 0 || i === frames - 1) {
     const per = (Date.now() - started) / (i + 1);

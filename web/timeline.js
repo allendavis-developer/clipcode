@@ -7,9 +7,15 @@
 
    Everything snaps to a frame. A clip boundary that lands between frames is a
    clip boundary the render cannot reproduce.
+
+   Transitions add two more to the vocabulary rather than a new gesture: the
+   edge of a transition block is a trim like any other edge, and pushing a clip
+   into the one before it is a move whose overlap becomes a length. Both run
+   inside the same captured drag. See transitions.js for the model.
    ========================================================================== */
-import { S, $, clamp, qFrame, qTime, duration, clipById, clipEnd, save, uid, mediaById } from './state.js';
+import { S, $, clamp, qFrame, qTime, duration, allClips, clipById, clipEnd, save, uid, mediaById } from './state.js';
 import { draggable } from './drag.js';
+import * as TX from './transitions.js';
 
 let onSeek = () => {}, onSelect = () => {}, onChange = () => {};
 export function wire(h) { onSeek = h.seek; onSelect = h.select; onChange = h.change; }
@@ -69,7 +75,52 @@ function clipEl(c, trackIndex) {
     + `<div class="cd">${((c.out - c.in) / 1000).toFixed(2)}s</div>`
     + `<div class="h l"></div><div class="h r"></div>`;
   if (c.kind === 'audio' || c.kind === 'video') drawWave(el, c);
+  const tx = txEl(c);
+  /* the kind's colour is set on the clip, not the block, so the clip's own
+     left edge can carry it too — at a zoom where the block is a sliver that
+     edge is the only thing left to see */
+  if (tx) { el.classList.add('hasTx', tx.dataset.kindClass); el.appendChild(tx); }
   return el;
+}
+
+/* ------------------------------------------------------------ transitions --
+   Drawn at the head of the incoming clip, which is exactly where it happens:
+   the window opens at the cut and runs into the clip that owns it. So a
+   boundary with a transition looks different from one without without needing
+   a marker invented for the purpose. */
+function txEl(c) {
+  /* below a frame it is not a transition yet — which is what dragging its
+     edge down to nothing looks like on the way to removing it */
+  if (!c.trans || !(Number(c.trans.ms) >= qTime(1))) return null;
+  const tx = TX.normalize(c.trans);
+  if (!tx) return null;
+
+  const el = document.createElement('div');
+  el.className = 'tx tx-' + tx.kind;
+  el.dataset.kindClass = 'tx-' + tx.kind;
+  const w = pxOf(tx.ms);
+  /* A two-frame whip is six pixels wide at the default zoom — too small to
+     read and too small to grab. The block has a floor so the boundary is
+     visible and the handle reachable; the number written on it is the truth,
+     and zooming in makes the width the truth too. */
+  el.style.width = Math.max(15, w) + 'px';
+  el.title = TX.describe(tx) + ' — drag this edge for its length, '
+    + 'double-click it to steer, drag it to nothing to remove';
+
+  const bits = [];
+  if (w > 70) bits.push(tx.kind + (TX.steerable(tx.kind) ? ' ' + TX.ARROW[tx.dir] : ''));
+  if (w > 36) bits.push(Math.round(tx.ms) + 'ms');
+  el.innerHTML = (bits.length ? `<span class="txn">${bits.join(' · ')}</span>` : '')
+    + `<i class="txh"></i>`;
+  return el;
+}
+
+/* The most this boundary can be given: neither clip may be asked for more
+   than it has. */
+function capOf(id) {
+  const all = allClips();
+  const b = all.find(c => c.id === id);
+  return b ? TX.capFor(all, b) : qTime(1);
 }
 
 /* -------------------------------------------------------------- waveform --
@@ -156,12 +207,17 @@ draggable($('#tlBody'), {
     const { clip, track } = found;
     S.sel = clip.id;
     onSelect(clip);
+    /* Asked before the trim handles: a short transition's edge sits on top of
+       the left trim handle, and the one you can see is the one you meant. */
+    const onTx = !!down.target.closest('.txh');
     const handle = down.target.classList.contains('h')
       ? (down.target.classList.contains('l') ? 'l' : 'r') : null;
     draw();
-    return { kind: handle ? 'trim' : 'maybe', side: handle, id: clip.id, track,
+    return { kind: onTx ? 'trans' : handle ? 'trim' : 'maybe',
+             side: handle, id: clip.id, track,
              x0: down.clientX, y0: down.clientY,
-             start0: clip.start, in0: clip.in, out0: clip.out };
+             start0: clip.start, in0: clip.in, out0: clip.out,
+             ms0: (clip.trans && Number(clip.trans.ms)) || 0 };
   },
 
   move: (e, d) => {
@@ -176,6 +232,14 @@ draggable($('#tlBody'), {
     if (!found) return;
     const clip = found.clip;
 
+    if (d.kind === 'trans') {
+      /* Zero is allowed on the way past — that is how you remove one, and a
+         floor here would mean there was no way back to no transition. */
+      clip.trans = { ...(clip.trans || { kind: 'dissolve' }),
+                     ms: clamp(snap(d.ms0 + msOf(dx)), 0, capOf(d.id)) };
+      draw();
+    }
+
     if (d.kind === 'move') {
       clip.start = Math.max(0, snap(d.start0 + msOf(dx)));
       const row = [...document.querySelectorAll('.track')].find(r => {
@@ -186,7 +250,9 @@ draggable($('#tlBody'), {
         const to = Number(row.dataset.track);
         if (to !== found.track) { moveToTrack(clip, found.track, to); d.track = to; }
       }
+      d.into = overlapped(clip, d.track);
       draw();
+      if (d.into) markPending(clip.id, d.into.ms);
     }
 
     if (d.kind === 'trim') {
@@ -205,8 +271,134 @@ draggable($('#tlBody'), {
   },
 
   end: (e, d) => {
-    if (d.kind === 'move' || d.kind === 'trim') { save(); onChange(); }
+    const clip = clipById(d.id)?.clip;
+
+    /* Dragged to nothing means gone. Anything else that survived the clamp is
+       a length, and a length is a transition. */
+    if (d.kind === 'trans' && clip) {
+      if (!(Number(clip.trans && clip.trans.ms) >= qTime(1))) delete clip.trans;
+      else clip.trans = TX.normalize(clip.trans);
+      draw();
+    }
+
+    /* The overlap you made is the length, and then the cut goes back to where
+       it was: the model has no geometric overlap, so leaving the clip where
+       the mouse dropped it would move everything after it by the length of a
+       transition you asked for and not for a cut you asked to move. */
+    if (d.kind === 'move' && clip && d.into) {
+      clip.start = clipEnd(d.into.a);
+      clip.trans = TX.normalize({ kind: (clip.trans && clip.trans.kind) || 'dissolve',
+                                  dir: clip.trans && clip.trans.dir,
+                                  ms: d.into.ms });
+      draw();
+    }
+
+    if (d.kind === 'move' || d.kind === 'trim' || d.kind === 'trans') { save(); onChange(); }
   }
+});
+
+/* Pushing a clip into the one before it is how you ask for a transition, so
+   the gesture that makes one is the gesture you already have. Bounded, because
+   a long overlap is someone rearranging the edit, not asking for a two second
+   dissolve — past that it stays a plain move. */
+const MAX_OVERLAP = 2000;
+
+function overlapped(clip, track) {
+  if (clip.kind === 'audio') return null;
+  let best = null;
+  for (const a of S.tracks[track].clips || []) {
+    if (a.id === clip.id || a.kind === 'audio' || a.start >= clip.start) continue;
+    const over = snap(clipEnd(a) - clip.start);
+    if (over < qTime(1) || over > MAX_OVERLAP) continue;
+    if (over > a.out - a.in || over > clip.out - clip.in) continue;
+    if (!best || clipEnd(a) > clipEnd(best.a)) best = { a, ms: over };
+  }
+  return best;
+}
+
+/* What the overlap will become, drawn where it will be. Added after draw()
+   rather than inside it because it belongs to a drag in progress and not to
+   the edit — nothing has been decided until the button comes up. */
+function markPending(id, ms) {
+  const el = document.querySelector(`.clip[data-id="${id}"]`);
+  if (!el) return;
+  el.classList.add('txMaking');
+  const g = document.createElement('div');
+  g.className = 'tx tx-pending';
+  g.style.width = Math.max(15, pxOf(ms)) + 'px';
+  g.innerHTML = `<span class="txn">${Math.round(ms)}ms</span>`;
+  el.appendChild(g);
+}
+
+/* ------------------------------------------------------------- the palette --
+   Drag a kind onto a cut. It goes through draggable() like everything else
+   rather than HTML5 drag-and-drop: pointer capture keeps every move on the
+   chip, so the drop can be resolved from the coordinates without every
+   possible target having to know about a drag it is not part of. */
+function boundaryAt(clientX, clientY) {
+  const row = [...document.querySelectorAll('.track')].find(r => {
+    const b = r.getBoundingClientRect();
+    return clientY >= b.top && clientY <= b.bottom;
+  });
+  if (!row) return null;
+  const ms = msOf(clientX - $('#tracks').getBoundingClientRect().left);
+  let best = null;
+  for (const c of S.tracks[Number(row.dataset.track)].clips || []) {
+    if (c.kind === 'audio') continue;
+    const px = Math.abs(pxOf(c.start - ms));
+    if (px > 44 || (best && px >= best.px)) continue;
+    best = { clip: c, px };
+  }
+  return best ? best.clip : null;
+}
+
+function aimAt(clip) {
+  for (const el of document.querySelectorAll('.clip.txTarget')) el.classList.remove('txTarget');
+  if (!clip) return;
+  const el = document.querySelector(`.clip[data-id="${clip.id}"]`);
+  if (el) el.classList.add('txTarget');
+}
+
+for (const chip of document.querySelectorAll('#txBar .txChip')) {
+  const kind = chip.dataset.kind;
+  const follow = (g, e) => { g.style.left = e.clientX + 'px'; g.style.top = e.clientY + 'px'; };
+  draggable(chip, {
+    start: down => {
+      const ghost = document.createElement('div');
+      ghost.className = 'txGhost tx-' + kind;
+      ghost.textContent = kind;
+      document.body.appendChild(ghost);
+      follow(ghost, down);
+      return { ghost };
+    },
+    move: (e, c) => { follow(c.ghost, e); aimAt(boundaryAt(e.clientX, e.clientY)); },
+    end: (e, c) => {
+      c.ghost.remove();
+      aimAt(null);
+      const b = boundaryAt(e.clientX, e.clientY);
+      if (!b) return;
+      const had = TX.normalize(b.trans);
+      /* Dropping the same kind a second time steers it. It is the next thing
+         you want after setting a push, and it needs no second control. */
+      const dir = had && had.kind === kind && TX.steerable(kind)
+        ? TX.nextDir(had.dir) : (had && had.dir) || 'l';
+      b.trans = TX.normalize({ kind, dir,
+        ms: Math.min(had ? had.ms : TX.defaultMs(kind), capOf(b.id)) });
+      S.sel = b.id;
+      save(); draw(); onSelect(b); onChange();
+    }
+  });
+}
+
+/* Direction is the one thing left that a drag cannot say, and the edge is
+   already the transition's own control, so it says it. */
+$('#tlBody').addEventListener('dblclick', e => {
+  const el = e.target.closest('.txh') && e.target.closest('.clip');
+  const clip = el && clipById(el.dataset.id)?.clip;
+  const tx = clip && TX.normalize(clip.trans);
+  if (!tx || !TX.steerable(tx.kind)) return;
+  clip.trans = { ...tx, dir: TX.nextDir(tx.dir) };
+  save(); draw(); onChange();
 });
 
 function moveToTrack(clip, from, to) {
@@ -258,6 +450,9 @@ export function splitAtPlayhead() {
   if (S.t <= c.start || S.t >= clipEnd(c)) return;
   const cut = snap(S.t);
   const right = { ...c, id: uid(), in: c.in + (cut - c.start), start: cut };
+  /* A split makes a new cut, and a new cut is a cut. The head transition
+     stays on the half that still starts where it always did. */
+  delete right.trans;
   c.out = c.in + (cut - c.start);
   S.tracks[f.track].clips.push(right);
   save(); draw(); onChange();

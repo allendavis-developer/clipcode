@@ -14,6 +14,7 @@ import { S, $, markSaved } from './state.js';
 import { PRESETS } from './presets.js';
 import { SIGNATURES } from './signatures.js';
 import * as Curve from './curve.js';
+import * as Path from './pathedit.js';
 import * as Help from './help.js';
 
 const IDLE_MS = 700;
@@ -44,8 +45,9 @@ export function init(handlers = {}) {
     cm.on('change', () => { clearTimeout(idle); idle = setTimeout(apply, IDLE_MS); });
     cm.on('blur', apply);          /* clicking away is finishing a thought */
     cm.on('cursorActivity', showSignature);
-    cm.on('cursorActivity', syncCurve);
+    cm.on('cursorActivity', syncPanels);
     Curve.init({ onChange: writeCurve });
+    Path.init({ onChange: writePath });
     applyZoom();
   }
   initPresets();
@@ -453,7 +455,8 @@ export function callAt(line, ch) {
    from memory. Both write into the code — the file stays the source of truth
    and what they wrote is right there to keep editing. */
 function initPickers() {
-  const colour = $('#pickColour'), font = $('#pickFont');
+  const colour = $('#pickColour'), font = $('#pickFont'), shape = $('#pickShape');
+  if (shape) shape.onclick = newShape;
   if (colour) {
     colour.addEventListener('input', () => replaceColour(colour.value));
     if (cm) cm.on('cursorActivity', () => {
@@ -708,4 +711,255 @@ function writeCurve(out) {
 
   clearTimeout(idle);
   idle = setTimeout(apply, 200);
+}
+
+
+/* ---------------------------------------------------------------- shapes --
+   Put the cursor inside a path([[x, y], ...]) and the shape editor opens on
+   those points; dragging one rewrites them in place. A raw('M...') opens too,
+   sampled into points, and editing it converts the call — which is why two
+   spans are tracked here, exactly as they are for curves. */
+let pathSpot = null;
+
+/* One handler, because the two panels share one cursor: a path() call is not
+   an easing, and only one of them should answer for where you are. */
+function syncPanels() {
+  if (syncPath()) return Curve.hide();
+  syncCurve();
+}
+
+/* Bracket matching rather than a regex, because a shape is the one call in a
+   clip that is routinely spread over several lines and full of nested
+   brackets, and a lazy [\s\S]*? gives up on the first ) inside a string. */
+function matchClose(text, i) {
+  const pairs = { '(': ')', '[': ']', '{': '}' };
+  const open = text[i], close = pairs[open];
+  if (!close) return -1;
+  let depth = 0, quote = null;
+  for (let k = i; k < text.length; k++) {
+    const c = text[k];
+    if (quote) {
+      if (c === '\\') k++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === open) depth++;
+    else if (c === close && --depth === 0) return k;
+  }
+  return -1;
+}
+
+/* The first { that is not inside anything else — the options object, rather
+   than a brace that happens to sit inside the first argument. */
+function topLevelBrace(text) {
+  let depth = 0, quote = null;
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    if (quote) {
+      if (c === '\\') k++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (c === '{' && depth === 0) return k;
+  }
+  return -1;
+}
+
+function splitTop(body) {
+  const out = [];
+  let depth = 0, quote = null, start = 0;
+  for (let k = 0; k <= body.length; k++) {
+    if (k === body.length) { out.push(body.slice(start, k)); break; }
+    const c = body[k];
+    if (quote) {
+      if (c === '\\') k++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if ('(['.includes(c) || c === '{') depth++;
+    else if (')]'.includes(c) || c === '}') depth--;
+    else if (c === ',' && depth === 0) { out.push(body.slice(start, k)); start = k + 1; }
+  }
+  return out.map(s => s.trim()).filter(Boolean);
+}
+
+const OWNED = ['smooth', 'closed', 'color', 'width', 'fill'];
+
+function asLiteral(src) {
+  const s = src.trim();
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  const q = /^(['"`])([\s\S]*)\1$/.exec(s);
+  if (q) return q[2];
+  const n = Number(s);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/* The options object, as an ordered list of key and SOURCE TEXT — not values.
+   That is what stops dragging a point from quietly deleting a glow, a dash or
+   a colour written as an expression: the panel rewrites the five options it
+   has controls for and hands every other one back exactly as it was typed. */
+function readOptions(inner) {
+  const at = topLevelBrace(inner);
+  const close = at < 0 ? -1 : matchClose(inner, at);
+  if (close < 0) return { known: {}, entries: null, opaque: [] };
+  const entries = [], known = {}, opaque = [];
+  for (const part of splitTop(inner.slice(at + 1, close))) {
+    const m = /^([A-Za-z_$][\w$]*|'[^']*'|"[^"]*")\s*:\s*([\s\S]+)$/.exec(part);
+    if (!m) { entries.push([null, part]); continue; }
+    const key = m[1].replace(/^['"]|['"]$/g, '');
+    entries.push([key, m[2].trim()]);
+    if (!OWNED.includes(key)) continue;
+    const v = asLiteral(m[2]);
+    if (v === undefined) opaque.push(key);       /* an expression: not ours to rewrite */
+    else known[key] = v;
+  }
+  return { known, entries, opaque };
+}
+
+/* Where the cursor is, and what shape that means. The whole call and its
+   arguments are both remembered: staying a path() rewrites the arguments,
+   turning a raw() into one rewrites the whole call, and replacing only the
+   arguments in that second case is how you end up with raw(path([...])). */
+function pathAt(text, at) {
+  let hit = null;
+  for (const m of text.matchAll(/\b(path|raw)\s*\(/g)) {
+    const open = m.index + m[0].length - 1;
+    const close = matchClose(text, open);
+    if (close < 0 || at < m.index || at > close + 1) continue;
+    hit = { name: m[1], outerFrom: m.index, outerTo: close + 1,
+            innerFrom: open + 1, innerTo: close };
+  }
+  if (!hit) return null;
+
+  const inner = text.slice(hit.innerFrom, hit.innerTo);
+  const o = readOptions(inner);
+  const spot = { kind: hit.name === 'raw' ? 'raw' : 'path',
+                 outerFrom: hit.outerFrom, outerTo: hit.outerTo,
+                 innerFrom: hit.innerFrom, innerTo: hit.innerTo,
+                 optSrc: o.entries, opaque: o.opaque };
+
+  if (hit.name === 'raw') {
+    const q = /(['"`])((?:\\.|(?!\1)[\s\S])*)\1/.exec(inner);
+    if (!q) return null;                     /* data built at runtime is not ours */
+    const d = q[2];
+    return { ...spot, d, opts: {
+      /* what the data already IS, so opening on it does not change the picture */
+      smooth: o.known.smooth !== undefined ? o.known.smooth : /[csqta]/i.test(d),
+      closed: o.known.closed !== undefined ? o.known.closed : /z\s*$/i.test(d),
+      color: o.known.color, width: o.known.width, fill: o.known.fill } };
+  }
+
+  const ob = inner.indexOf('[');
+  const brace = topLevelBrace(inner);
+  /* Points that come from a variable are not ours to drag — and an array
+     inside the options object is not the points list either. */
+  if (ob < 0 || (brace >= 0 && ob > brace)) return null;
+  const cb = matchClose(inner, ob);
+  if (cb < 0) return null;
+  const pts = [...inner.slice(ob, cb + 1)
+    .matchAll(/\[\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]/g)]
+    .map(q => [Number(q[1]), Number(q[2])]);
+  if (pts.length < 2) return null;
+  return { ...spot, points: pts, opts: o.known };
+}
+
+/* True when the shape editor has taken the cursor, so the curve editor knows
+   to stay out of the way. */
+function syncPath() {
+  if (!cm) return false;
+  if (Path.isDragging()) return true;   /* the drag owns the range until it lets go */
+  const found = pathAt(cm.getValue(), cm.indexFromPos(cm.getCursor()));
+  if (!found) { pathSpot = null; Path.hide(); return false; }
+  pathSpot = found;
+  Path.show({ kind: found.kind, points: found.points, d: found.d,
+              opts: found.opts, stage: S.stage });
+  return true;
+}
+
+/* A shape has as many points as it has corners, so long enough to wrap is the
+   normal case — and one 300-character line is not code anybody can read. */
+function pointsText(points, indent) {
+  const each = points.map(p => `[${p[0]}, ${p[1]}]`);
+  const one = '[' + each.join(', ') + ']';
+  if (indent.length + one.length <= 78) return one;
+  const rows = [];
+  for (let i = 0; i < each.length; i += 4) rows.push(each.slice(i, i + 4).join(', '));
+  return '[' + rows.join(',\n' + indent + ' ') + ']';
+}
+
+function optionsText(o, src, opaque) {
+  const entries = (src || []).map(e => e.slice());
+  const put = (k, v) => {
+    if (opaque && opaque.includes(k)) return;    /* written as an expression: leave it */
+    const i = entries.findIndex(e => e[0] === k);
+    if (v === null) { if (i >= 0) entries.splice(i, 1); return; }
+    if (i >= 0) entries[i][1] = v; else entries.push([k, v]);
+  };
+  put('smooth', o.smooth ? 'true' : null);
+  put('closed', o.closed ? 'true' : null);
+  put('color', o.color ? `'${o.color}'` : null);
+  put('width', o.width == null ? null : String(o.width));
+  put('fill', o.fill ? `'${o.fill}'` : null);
+  const body = entries.map(([k, v]) => (k === null ? v : `${k}: ${v}`)).join(', ');
+  return { text: body ? `{ ${body} }` : '', entries };
+}
+
+/* The panel hands back the shape it is editing; this turns that into the exact
+   text the code should now read, and remembers the new spans. */
+function writePath(out) {
+  if (!cm || !pathSpot) return;
+  const same = pathSpot.kind === 'path';
+  const head = cm.posFromIndex(pathSpot.outerFrom);
+  const indent = ((cm.getLine(head.line) || '').match(/^\s*/) || [''])[0] + '  ';
+
+  const o = optionsText(out.opts, pathSpot.optSrc, pathSpot.opaque);
+  const inner = pointsText(out.points, indent) + (o.text ? ', ' + o.text : '');
+  const text = same ? inner : `path(${inner})`;
+  const from = same ? pathSpot.innerFrom : pathSpot.outerFrom;
+  const to   = same ? pathSpot.innerTo   : pathSpot.outerTo;
+
+  cm.replaceRange(text, cm.posFromIndex(from), cm.posFromIndex(to));
+
+  if (!same) { pathSpot.kind = 'path'; pathSpot.outerFrom = from; pathSpot.innerFrom = from + 5; }
+  pathSpot.innerTo = pathSpot.innerFrom + inner.length;
+  pathSpot.outerTo = pathSpot.innerTo + 1;
+  pathSpot.optSrc = o.entries;
+
+  clearTimeout(idle);
+  idle = setTimeout(apply, 200);
+}
+
+/* Never answer a click with an instruction. The button opens the editor on the
+   shape at the cursor; when there is not one it writes a starter — in this
+   stage's own coordinates, so it lands in the middle of the picture — and
+   opens on that. */
+function newShape() {
+  if (!cm || !clip || clip.kind !== 'code') return;
+  cm.focus();
+  if (syncPath()) return;
+
+  const w = S.stage.w || 1920, h = S.stage.h || 1080;
+  const r = n => Math.round(n / 10) * 10;
+  const pts = [[r(w * .28), r(h * .62)], [r(w * .5), r(h * .3)], [r(w * .72), r(h * .62)]];
+  const code = `path([${pts.map(p => `[${p[0]}, ${p[1]}]`).join(', ')}], `
+             + `{ smooth: true, width: 8, color: '#ffb02e' });`;
+
+  const cur = cm.getCursor();
+  const here = cm.getLine(cur.line) || '';
+  const pad = (here.match(/^\s*/) || [''])[0];
+  const blank = !here.trim();
+  if (blank) cm.replaceRange(pad + code, { line: cur.line, ch: 0 },
+                                         { line: cur.line, ch: here.length });
+  else cm.replaceRange('\n' + pad + code, { line: cur.line, ch: here.length });
+
+  /* land inside the points, which is what opens the panel on them */
+  cm.setCursor({ line: blank ? cur.line : cur.line + 1, ch: pad.length + 6 });
+  clearTimeout(idle);
+  idle = setTimeout(apply, 250);
 }

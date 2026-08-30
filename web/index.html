@@ -25,6 +25,16 @@
     <span class="sep"></span>
     <button id="btnImport" class="btn">Import media</button>
     <button id="btnNewCode" class="btn">New code clip</button>
+    <span class="sep"></span>
+    <!-- Drag one onto a cut. Up here rather than in the timeline's own tools
+         strip because that strip is 96px wide and doubles as the spacer that
+         keeps the track labels level with the track rows. -->
+    <div id="txBar" title="Drag onto a cut. Drag its edge for the length, double-click the edge to steer it.">
+      <span class="txChip tx-dissolve" data-kind="dissolve">dissolve</span>
+      <span class="txChip tx-dip" data-kind="dip">dip</span>
+      <span class="txChip tx-push" data-kind="push">push</span>
+      <span class="txChip tx-whip" data-kind="whip">whip</span>
+    </div>
     <span class="grow"></span>
     <button id="btnHelp" class="btn" title="Reference — F1">Help</button>
     <span id="saved" class="pill">saved</span>
@@ -82,6 +92,8 @@
         <input id="pickColour" class="mini swatch" type="color" value="#ffb02e"
                title="colour — seeds from the hex nearest the cursor">
         <select id="pickFont" class="mini"><option value="">font&hellip;</option></select>
+        <button id="pickShape" class="btn mini"
+                title="draw a shape — opens on the path() at the cursor, or starts one">shape</button>
         <select id="presets" class="mini"><option value="">insert a move&hellip;</option></select>
         <button id="btnSaveMove" class="btn mini">save move</button>
         <span class="sep"></span>
@@ -91,6 +103,7 @@
       <textarea id="code" spellcheck="false"></textarea>
       <div id="sig" class="hidden"></div>
       <div id="curve" class="hidden"></div>
+      <div id="pathedit" class="hidden"></div>
       <div id="codeNote" class="hidden"></div>
       <div id="codeErr" class="hidden"></div>
     </section>

@@ -18,9 +18,10 @@
      1  A track is [[time, value], [time, value, easing]]. It is sampled at t
         and held outside its range. Every animated value is one of these.
 
-     2  anim(el, t, spec) applies an object of tracks. Properties sharing a
-        CSS transform are composed into one string in a fixed order so they
-        cannot overwrite each other, and the three filter properties likewise.
+     2  anim(el, t, spec) applies an object of tracks. Properties sharing one
+        CSS property are composed into a single string in a fixed order so
+        they cannot overwrite each other: the transform, the filter (blur,
+        the colour grade, the glow and the shadow), and the gradient fill.
 
      3  stagger(list, t, gap, spec) applies one spec down a list with an
         increasing delay. The cost of writing it does not grow with the length
@@ -301,7 +302,20 @@
                 rx:'rotateX', ry:'rotateY', bright:'brightness', sat:'saturation' };
   var TRANSFORM = { x:1, y:1, z:1, scale:1, scaleX:1, scaleY:1,
                     rotation:1, rotateX:1, rotateY:1 };
-  var FILTER    = { blur:1, brightness:1, saturation:1 };
+  /* Everything that ends up inside the ONE CSS filter string. A property here
+     cannot be written to the element on its own — the last writer would win
+     and every other effect would vanish — so they are gathered and composed in
+     the fixed order in FX_ORDER below. */
+  var FILTER    = { blur:1, brightness:1, saturation:1, contrast:1,
+                    grayscale:1, sepia:1, invert:1, hue:1,
+                    glow:1, shadowX:1, shadowY:1, shadowBlur:1 };
+  /* Colours are not numbers, so they cannot be tracks. They ride in the same
+     spec as plain strings and are read straight out of it. */
+  var FILTER_COLOR = { glowColor:1, shadowColor:1 };
+  /* The other two composites: a gradient is colours + angle + offset in one
+     background-image, and a text outline is a width and a colour. */
+  var GRADIENT  = { gradientColors:1, gradientAngle:1, gradientShift:1 };
+  var STROKE    = { textStroke:1, textStrokeColor:1 };
   var PX        = { top:1, left:1, right:1, bottom:1, width:1, height:1,
                     fontSize:1, letterSpacing:1, borderRadius:1, borderWidth:1,
                     gap:1, rowGap:1, columnGap:1, padding:1, margin:1,
@@ -320,12 +334,14 @@
     var n = el(target);
     if (!n || !rawSpec) return n;
     var spec = canonical(rawSpec);
-    var k, v, anyT = false, anyF = false;
+    var k, v, anyT = false, anyF = false, anyG = false, anyS = false;
 
     for (k in spec) {
       if (!spec.hasOwnProperty(k)) continue;
       if (TRANSFORM[k]) { anyT = true; continue; }
-      if (FILTER[k])    { anyF = true; continue; }
+      if (FILTER[k] || FILTER_COLOR[k]) { anyF = true; continue; }
+      if (GRADIENT[k])  { anyG = true; continue; }
+      if (STROKE[k])    { anyS = true; continue; }
       v = track(spec[k], t);
       if (k === 'opacity') n.style.opacity = (+v).toFixed(4);
       else if (typeof v === 'number' && PX[k]) n.style[k] = v.toFixed(2) + 'px';
@@ -343,14 +359,59 @@
         + (r  ? ' rotate('  + r.toFixed(3)  + 'deg)' : '')
         + ' scale(' + sx.toFixed(4) + ',' + sy.toFixed(4) + ')';
     }
+    /* One filter string, built in a FIXED order, because a CSS filter is a
+       pipeline and not a set: each function eats the previous one's output.
+       Grade first so a tint changes the colour that the halo is then made of;
+       blur before the shadows so a soft thing casts a soft shadow rather than
+       a sharp shadow of a soft thing. Written in any other order the same
+       numbers give a different picture, so the order is not the caller's to
+       vary — it is the one thing that makes these composable at all. */
     if (anyF) {
-      var bl = spec.blur       ? track(spec.blur, t)       : 0;
-      var br = spec.brightness ? track(spec.brightness, t) : 1;
-      var sa = spec.saturation ? track(spec.saturation, t) : 1;
-      var f = (bl > 0.02 ? 'blur(' + bl.toFixed(2) + 'px) ' : '')
-            + (Math.abs(br - 1) > 0.002 ? 'brightness(' + br.toFixed(3) + ') ' : '')
-            + (Math.abs(sa - 1) > 0.002 ? 'saturate(' + sa.toFixed(3) + ')' : '');
+      var q = function (key, dflt) { return spec[key] === undefined ? dflt : track(spec[key], t); };
+      var gy = q('grayscale', 0), se = q('sepia', 0), iv = q('invert', 0), hu = q('hue', 0);
+      var sa = q('saturation', 1), co = q('contrast', 1), br = q('brightness', 1);
+      var bl = q('blur', 0), gl = q('glow', 0);
+      var dx = q('shadowX', 0), dy = q('shadowY', 0), db = q('shadowBlur', 0);
+      var gc = spec.glowColor || 'currentColor';
+      var sc = spec.shadowColor || 'rgba(0,0,0,.55)';
+      var f = '';
+      if (gy > 0.002) f += 'grayscale(' + gy.toFixed(3) + ') ';
+      if (se > 0.002) f += 'sepia(' + se.toFixed(3) + ') ';
+      if (iv > 0.002) f += 'invert(' + iv.toFixed(3) + ') ';
+      if (Math.abs(hu) > 0.05) f += 'hue-rotate(' + hu.toFixed(2) + 'deg) ';
+      if (Math.abs(sa - 1) > 0.002) f += 'saturate(' + sa.toFixed(3) + ') ';
+      if (Math.abs(co - 1) > 0.002) f += 'contrast(' + co.toFixed(3) + ') ';
+      if (Math.abs(br - 1) > 0.002) f += 'brightness(' + br.toFixed(3) + ') ';
+      if (bl > 0.02) f += 'blur(' + bl.toFixed(2) + 'px) ';
+      /* Two haloes, not one. A single drop-shadow reads as a rim drawn around
+         the edge; a tight one inside a wide faint one reads as light coming
+         off the thing, which is what a bloom is. */
+      if (gl > 0.05) f += 'drop-shadow(0 0 ' + (gl * 0.4).toFixed(2) + 'px ' + gc + ') '
+                        + 'drop-shadow(0 0 ' + gl.toFixed(2) + 'px ' + gc + ') ';
+      if (db > 0.02 || Math.abs(dx) > 0.02 || Math.abs(dy) > 0.02)
+        f += 'drop-shadow(' + dx.toFixed(2) + 'px ' + dy.toFixed(2) + 'px '
+           + Math.max(0, db).toFixed(2) + 'px ' + sc + ') ';
       n.style.filter = f.trim() || 'none';
+    }
+    /* Colours, angle and offset are three properties of ONE background-image,
+       so they are composed here for the same reason the filter is. The offset
+       is what sweeps a highlight across a word: the gradient is wider than the
+       element, and this slides it. */
+    if (anyG) {
+      var cols = spec.gradientColors;
+      if (cols && cols.length) {
+        var ang = spec.gradientAngle === undefined ? 90 : track(spec.gradientAngle, t);
+        n.style.backgroundImage =
+          'linear-gradient(' + ang.toFixed(2) + 'deg,' + cols.join(',') + ')';
+      }
+      if (spec.gradientShift !== undefined)
+        n.style.backgroundPosition = track(spec.gradientShift, t).toFixed(2) + '% 50%';
+    }
+    if (anyS) {
+      if (spec.textStroke !== undefined)
+        n.style.webkitTextStrokeWidth = Math.max(0, track(spec.textStroke, t)).toFixed(2) + 'px';
+      if (typeof spec.textStrokeColor === 'string')
+        n.style.webkitTextStrokeColor = spec.textStrokeColor;
     }
     return n;
   }
@@ -668,15 +729,34 @@
    *    rotation, rotateX, rotateY    degrees
    *    blur                          pixels
    *    brightness, saturation        1 is unmodified
+   *    contrast                      1 is unmodified
+   *    grayscale, sepia, invert      0 to 1
+   *    hue                           degrees around the colour wheel
+   *    glow                          halo radius in pixels
+   *    shadowX, shadowY, shadowBlur  a cast shadow, in pixels
+   *    textStroke                    outline width on text, in pixels
+   *    gradientAngle                 degrees, 90 being left to right
+   *    gradientShift                 slides the gradient across, in per cent
    *
-   *  The transform properties are combined into one CSS transform and the
-   *  three filter properties into one CSS filter, so setting several of
-   *  them does not cause one to overwrite another.
+   *  These four are settings rather than tracks, because a colour is not a
+   *  number and cannot be interpolated by track():
+   *
+   *    glowColor, shadowColor, textStrokeColor   any CSS colour. glowColor
+   *                                              defaults to currentColor, so
+   *                                              a thing glows its own colour
+   *    gradientColors                            a list of CSS colours
+   *
+   *  The transform properties are combined into one CSS transform, the filter
+   *  properties into one CSS filter, and the gradient properties into one
+   *  background-image, so setting several of them does not cause one to
+   *  overwrite another. Within the filter the order is fixed — grade, then
+   *  blur, then glow, then shadow — because a filter is a pipeline and the
+   *  same numbers in another order are a different picture.
    *  ex  line('l1', 'example text', t, {
    *  ex    top: 340, size: 268,
    *  ex    opacity: fadeIn(0, 340),
    *  ex    y: change(0, 340, -70, 0, overshoot),
-   *  ex    rotation: change(0, 340, -5, 0)
+   *  ex    glow: change(0, 340, 0, 26), glowColor: '#ffb02e'
    *  ex  });
    */
 

@@ -119,7 +119,8 @@ checkScene();
 for (const f of ['server.mjs', 'lib/paths.mjs', 'lib/project.mjs', 'lib/media.mjs',
                  'lib/fonts.mjs', 'web/motion.js', 'web/app.js', 'web/editor.js',
                  'web/curve.js', 'web/scene.js', 'web/stage.js', 'web/transport.js', 'web/drag.js',
-                 'web/layout.js', 'web/timeline.js', 'web/pool.js', 'web/state.js', 'web/signatures.js']) {
+                 'web/layout.js', 'web/timeline.js', 'web/pool.js', 'web/state.js', 'web/signatures.js',
+                 'web/transitions.js']) {
   const full = path.join(HERE, f);
   if (!fs.existsSync(full)) continue;
   try { await import(pathToFileURL(full).href); }

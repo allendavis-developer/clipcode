@@ -8,8 +8,15 @@
    Time inside a clip is  (t - clip.start) + clip.in  — the clip's own clock,
    which is what a code clip's __render(t) is given and what a video element's
    currentTime is set to. Nothing downstream ever sees timeline time.
+
+   TRANSITIONS happen here and only here, which is the point: the render page
+   loads this same file, so an export gets them without a second implementation
+   of the picture. All they do is keep the outgoing clip's layer alive past its
+   own end and set opacity, transform and filter on both — see transitions.js
+   for the model and why the window sits after the cut.
    ========================================================================== */
 import { S, $, allClips, clipEnd, qFrame, qTime, urlOf } from './state.js';
+import * as TX from './transitions.js';
 
 const layers = new Map();      /* clip.id -> {el, kind, src, ready} */
 let onError = () => {};
@@ -124,6 +131,19 @@ export function reloadClip(id) {
   L.el.src = urlOf(L.src) + '?v=' + Date.now();
 }
 
+/* clip.id -> how that layer is dressed at t, for the transitions open at t.
+   A map rather than a lookup per layer because a layer has to be able to ask
+   "am I in one?" and get `undefined`, which is what resets it. */
+function looks(all, t) {
+  const look = new Map();
+  for (const x of TX.activeAt(all, t)) {
+    const s = TX.stylesAt(x.tx, x.u);
+    if (x.a) look.set(x.a.id, s.going);
+    look.set(x.b.id, { ...s.coming, over: true });
+  }
+  return look;
+}
+
 let painting = false, lastFrame = -1;
 export async function paint(force = false) {
   if (painting) return;
@@ -133,7 +153,12 @@ export async function paint(force = false) {
   painting = true;
   try {
     const t = qTime(f);
-    const visible = allClips().filter(c => t >= c.start && t < clipEnd(c));
+    const all = allClips();
+    const look = looks(all, t);
+    /* An outgoing clip is under the playhead by the only definition that
+       matters — it is on screen — even though the playhead has passed its
+       out point. That is the whole mechanism. */
+    const visible = all.filter(c => (t >= c.start && t < clipEnd(c)) || look.has(c.id));
     const want = new Set(visible.map(c => c.id));
 
     for (const [id, L] of layers)
@@ -146,7 +171,13 @@ export async function paint(force = false) {
         L = makeLayer(c);
         layers.set(c.id, L);
       }
-      L.el.style.zIndex = String(c._track + 1);
+      const style = look.get(c.id);
+      /* Two clips in a transition are on the same track and would otherwise
+         stack in whatever order their layers happen to sit in the document.
+         Moving an iframe in the DOM reloads it, so the order is decided by
+         z-index instead, and each track leaves a slot above itself for it. */
+      L.el.style.zIndex = String((c._track + 1) * 2 + (style && style.over ? 1 : 0));
+      TX.applyTo(L.el, style);
       const local = t - c.start + c.in;
 
       if (c.kind === 'video' || c.kind === 'audio') {
@@ -175,13 +206,19 @@ export function invalidate() { lastFrame = -1; }
    outside is how an afternoon disappears; this makes it answerable. */
 export function status() {
   const t = qTime(qFrame(S.t));
-  const want = allClips().filter(c => t >= c.start && t < clipEnd(c));
+  const all = allClips();
+  const look = looks(all, t);
+  const want = all.filter(c => (t >= c.start && t < clipEnd(c)) || look.has(c.id));
   const parts = want.map(c => {
     const L = layers.get(c.id);
     if (!L) return c.kind + ':none';
     if (L.kind !== 'code') return c.kind;
     return 'code:' + (L.ready ? 'ready' : 'loading');
   });
+  /* mid-transition is a state you can otherwise only guess at from a picture
+     that looks half wrong */
+  for (const x of TX.activeAt(all, t))
+    parts.push(`${x.tx.kind} ${Math.round(x.u * 100)}%`);
   return want.length ? parts.join(' ') : 'nothing under playhead';
 }
 export function pauseAllMedia() {

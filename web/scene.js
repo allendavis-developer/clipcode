@@ -121,6 +121,11 @@
      is what keeps the render a pure function of t. */
   var nodes = [];
   var counter = 0;
+  /* Latched for the life of the page, not the frame: it is what says whether
+     the matte pass has anything to clean up. A clip that never masks anything
+     never pays for the pass, and one that stops masking still gets the mask
+     taken off the element it was on. */
+  var everMasked = false;
   var camera = null;                /* the one camera, rebuilt each frame */
   var W_ = W.__stageW, H_ = W.__stageH;
   var idFor = function (kind) { return 's' + (counter++) + kind.charAt(0); };
@@ -166,6 +171,11 @@
     this.id = idFor(kind);
     this.opts = opts || {};
     this.css = {};                    /* fixed appearance */
+    /* Effects set once rather than animated. They are held as TRACKS, not as
+       CSS, so that a look and a move of the same name meet in one spec and
+       compose instead of one of them writing style.filter last and winning. */
+    this.fx = {};
+    this.mask = null;                 /* {of, invert, feather, show} */
     this.moves = [];                  /* {at, dur, spec} in node-local time */
     this.children = [];               /* for group and items */
     this.gapMs = 0;                   /* stagger between children */
@@ -271,6 +281,180 @@
    *  ex  text('heads up').style({ letterSpacing: -4, textShadow: '0 6px 30px #000' })
    */
   P.style = function (o) { for (var k in o) this.css[k] = o[k]; return this; };
+
+  /* ---------------------------------------------------------- the effects --
+
+     Six primitives, not a shelf of named looks. Each one is a small set of
+     numbers that go into the same spec as x, y and opacity, so every one of
+     them animates by writing a pair instead of a value:
+
+         badge.glow(24);                        a standing look
+         badge.enter(300, { glow: [0, 24] });   the same thing, arriving
+
+     That is the whole reason these are properties rather than CSS: a look you
+     can only set is a look you cannot choreograph, and choreography is what
+     this editor is. They compose because motion.js gathers everything that
+     shares one CSS property — the filter, the background-image, the text
+     stroke — and writes it once in a fixed order. */
+
+  /** .glow(radiusPx, colour)   @look
+   *  A halo of light around the thing, in its own colour unless you name one.
+   *
+   *  It is two stacked haloes rather than one, a tight one inside a wide faint
+   *  one, because a single shadow reads as a rim drawn on the edge and two
+   *  read as light coming off the object.
+   *
+   *  Animate it with glow: [from, to] in any spec, which is where it earns its
+   *  keep — a number that lights up as it lands.
+   *  ex  text('3361').color('#ffb02e').glow(30);
+   *  ex  text('3361').color('#ffb02e').enter(400, { opacity: [0, 1], glow: [0, 40] });
+   */
+  P.glow = function (px, colour) {
+    this.fx.glow = M.hold(px === undefined ? 24 : px);
+    if (colour) this.fx.glowColor = colour;
+    return this;
+  };
+
+  /** .shadow(offsetX, offsetY, blurPx, colour)   @look
+   *  A cast shadow. It follows the shape's own outline rather than its box, so
+   *  text throws a shadow of the letters and a path throws one of the line.
+   *
+   *  Animate it with shadowX, shadowY or shadowBlur: a shadow that grows and
+   *  slides as something rises is what makes it read as lifting off the page
+   *  rather than as getting bigger.
+   *  ex  card.shadow(0, 24, 60, 'rgba(0,0,0,.6)');
+   *  ex  card.enter(400, { y: [40, 0], shadowY: [4, 30], shadowBlur: [10, 70] });
+   */
+  P.shadow = function (x, y, blur, colour) {
+    this.fx.shadowX = M.hold(x || 0);
+    this.fx.shadowY = M.hold(y === undefined ? 14 : y);
+    this.fx.shadowBlur = M.hold(blur === undefined ? 30 : blur);
+    if (colour) this.fx.shadowColor = colour;
+    return this;
+  };
+
+  /** .tint(options)   @look
+   *  A colour grade: the whole thing pushed around the colour wheel or drained
+   *  of colour, rather than recoloured element by element.
+   *
+   *    hue         degrees around the wheel
+   *    saturation  1 is unchanged, 0 is grey, 2 is twice as strong
+   *    brightness  1 is unchanged
+   *    contrast    1 is unchanged
+   *    grayscale   0 to 1
+   *    sepia       0 to 1
+   *    invert      0 to 1
+   *
+   *  All seven animate under those names, so a shot can drain to grey as it
+   *  leaves or a photograph can arrive already graded and resolve.
+   *  ex  photo.tint({ saturation: 0.2, contrast: 1.3 });
+   *  ex  photo.enter(600, { opacity: [0, 1], grayscale: [1, 0], contrast: [1.6, 1] });
+   */
+  P.tint = function (o) {
+    o = o || {};
+    var K = ['hue', 'saturation', 'brightness', 'contrast',
+             'grayscale', 'sepia', 'invert'], i;
+    for (i = 0; i < K.length; i++)
+      if (o[K[i]] !== undefined) this.fx[K[i]] = M.hold(o[K[i]]);
+    return this;
+  };
+
+  /** .gradient([colours], options)   @look
+   *  Fills the thing with a gradient instead of a flat colour. On text the
+   *  gradient is painted THROUGH the letters, which is the only way CSS has to
+   *  fill type with anything but one colour.
+   *
+   *    angle  degrees, 90 being left to right and 0 bottom to top
+   *    sweep  true makes the gradient wider than the thing, so gradientShift
+   *           has somewhere to slide it — a highlight crossing a word is that
+   *           and nothing else
+   *
+   *  gradientAngle and gradientShift both animate.
+   *  ex  text('SOLD OUT').size(200).gradient(['#ffb02e', '#e12392']);
+   *  ex  text('SOLD OUT').size(200)
+   *  ex    .gradient(['#333', '#fff', '#333'], { sweep: true })
+   *  ex    .enter(900, { gradientShift: [0, 100] });
+   */
+  P.gradient = function (colours, o) {
+    o = o || {};
+    var list = (colours && colours.length) ? colours : ['#fff', '#fff'];
+    this.fx.gradientColors = list;
+    this.fx.gradientAngle = M.hold(o.angle === undefined ? 90 : o.angle);
+    /* Type has to become transparent for a background to show through it;
+       there is no other way to put a gradient inside a letterform. */
+    if (this.kind === 'text' || this.kind === 'group' || this.kind === 'items') {
+      this.css.webkitBackgroundClip = 'text';
+      this.css.backgroundClip = 'text';
+      this.css.color = 'transparent';
+    }
+    this.css.backgroundRepeat = 'no-repeat';
+    this.css.backgroundSize = o.sweep ? '300% 100%' : '100% 100%';
+    return this;
+  };
+
+  /** .outline(widthPx, colour)   @look
+   *  A stroke around the letters. With .color('transparent') under it you get
+   *  hollow type, which is the other half of every headline that fills in.
+   *
+   *  Animate the width with textStroke.
+   *  ex  text('EVERY DAY').size(180).color('transparent').outline(3, '#fff');
+   *  ex  headline.enter(500, { textStroke: [8, 0], opacity: [0, 1] });
+   */
+  P.outline = function (px, colour) {
+    this.fx.textStroke = M.hold(px === undefined ? 2 : px);
+    if (colour) this.fx.textStrokeColor = colour;
+    return this;
+  };
+
+  /* Both masks are the same declaration with the sense flipped, so they are
+     one function. Nothing is drawn here: the matte is rebuilt at the end of
+     the frame, once everything it measures has been laid out and moved. */
+  function matte(n, of, invert, o) {
+    o = o || {};
+    n.mask = { of: of, invert: invert, feather: o.feather || 0, show: !!o.show };
+    everMasked = true;
+    return n;
+  }
+
+  /** .showWhere(shape, options)   @look
+   *  Show this only where `shape` is. Everywhere else it is not drawn.
+   *
+   *  This is a matte, and its whole value is that the shape may be MOVING: a
+   *  bar sweeping across reveals what is under it as it passes, and a path()
+   *  part way through a .draw() reveals along the stroke it has written so
+   *  far. Nothing extra is written for that — the matte is read back off the
+   *  shape every frame, so whatever the shape does, the reveal does.
+   *
+   *  The shape is taken out of the picture, the way switching a layer to a
+   *  matte takes it out of one; pass { show: true } to keep drawing it too.
+   *
+   *    feather  soften the edge by this many pixels
+   *    show     also draw the shape itself
+   *
+   *  A path() mattes by what it PAINTS, fill and stroke both. Anything else —
+   *  shape(), image(), text() — mattes by its box, with its corner radius, so
+   *  a round shape() cuts a round hole.
+   *  ex  const wipe = shape({ width: 700, height: 300, background: '#fff' }).at(-700, 300);
+   *  ex  const head = text('REVEALED').size(200).at(200, 340);
+   *  ex  wipe.move({ x: 1800 }, 900);
+   *  ex  head.showWhere(wipe);
+   */
+  P.showWhere = function (of, o) { return matte(this, of, false, o); };
+
+  /** .hideWhere(shape, options)   @look
+   *  The other half: show this everywhere EXCEPT where `shape` is, so the
+   *  shape punches a hole rather than cutting one out.
+   *
+   *  Same options as .showWhere(). The pair is named this way round because
+   *  the inverse of a matte is not a thing you can name after either object —
+   *  "the headline is the inverse of the wipe" is not what is happening. What
+   *  is happening is that the shape says where to show and where to hide, and
+   *  these two say which.
+   *  ex  const hole = shape({ width: 300, height: 300, borderRadius: 150 }).at(500, 300);
+   *  ex  hole.move({ x: 900 }, 1200);
+   *  ex  backdrop.hideWhere(hole);
+   */
+  P.hideWhere = function (of, o) { return matte(this, of, true, o); };
 
   /** .layout(direction, options)   @group
    *  Arranges a group's children in a row or a column, with a gap between
@@ -715,6 +899,12 @@
        goes into the spec as a constant rather than being animated. */
     if (n.z) spec.z = spec.z || M.hold(n.z);
 
+    /* An effect set with .glow() or .tint() is the same kind of standing fact,
+       and joins the spec the same way. A move that animates the same name wins
+       outright rather than fighting it, so .glow(30) and a spec that says
+       glow: [0, 40] do not produce two writers of one CSS property. */
+    for (var fk in n.fx) if (spec[fk] === undefined) spec[fk] = n.fx[fk];
+
     if (!perChild && Object.keys(spec).length)
       M.anim(el, local, reverse ? flip(spec) : spec);
     else if (!perChild && n.z) M.anim(el, local, { z: M.hold(n.z) });
@@ -816,6 +1006,10 @@
       if (nodes[i].kind !== 'wire' && nodes[i].kind !== 'path') continue;
       applyNode(nodes[i], t, 0);
     }
+    /* Last, and for the same reason wires come after boxes: a matte is
+       measured off a shape, and a shape that has not been placed yet measures
+       as nothing. */
+    applyMasks();
     for (i = 0; i < nodes.length; i++) end = Math.max(end, nodes[i].endsAt());
     if (camera) end = Math.max(end, camera.length());
     /* A clip with no duration() of its own is as long as its choreography.
@@ -1244,8 +1438,14 @@
     el.setAttribute('stroke-linecap', o.cap || 'round');
     el.setAttribute('stroke-linejoin', 'round');
     if (o.dash) el.setAttribute('stroke-dasharray', o.dash === true ? '18 14' : o.dash);
-    el.style.filter = o.glow
-      ? 'drop-shadow(0 0 16px ' + (n.css.color || o.color || '#fff') + ')' : '';
+    /* A path's glow goes through the same filter stack as everything else's,
+       rather than writing style.filter here. Two writers of one CSS property
+       is exactly the bug the effects stack exists to prevent, and it would
+       have been this one: a .glow() or an animated glow on the same path. */
+    if (o.glow && n.fx.glow === undefined) {
+      n.fx.glow = M.hold(o.glow === true ? 20 : o.glow);
+      n.fx.glowColor = n.fx.glowColor || n.css.color || o.color || '#fff';
+    }
     for (var k in n.css) {
       var v = n.css[k];
       el.style[k] = (typeof v === 'number' && k !== 'opacity') ? v + 'px' : v;
@@ -1302,6 +1502,212 @@
       d = 'M' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
     }
     return pathEl(n, d);
+  }
+
+  /* -------------------------------------------------------------- mattes --
+
+     "Show this only where that is." Three ways were open:
+
+       clip-path        a hard edge and nothing else. It cannot express a
+                        stroke, so a path() drawing itself on could not be a
+                        matte — which is the one case worth having.
+       SVG <clipPath>   the same shape of answer: it uses the FILL of its
+                        children and throws the stroke away.
+       CSS mask         reads the mask as it is PAINTED. Fill, stroke, dash
+                        offset, opacity and a blurred edge all mean something,
+                        so an animated shape is an animated matte for free.
+
+     So: mask. The matte is a live redraw of the shape into an SVG <mask>,
+     painted flat white to show and flat black to hide, because a mask is a
+     stencil and a magenta wipe must cut the same hole as a white one.
+
+     ------------------------------------------------------------ coordinates
+
+     A mask is interpreted in the element's own UNTRANSFORMED box, which was
+     measured rather than assumed. Two consequences, both handled below:
+
+       the shape's world coordinates have to be shifted into that box, and
+       the element's own transform has to be UNDONE inside the mask, or the
+       matte rides along with whatever the masked thing is doing — a headline
+       that pops in would drag its own reveal in with it.
+
+     What is deliberately not undone is the camera. #__world's transform is
+     applied to the masked element after the mask, so a matte pans, zooms and
+     turns with everything else, which is what a matte in a composition does.
+     The svg holding the masks is therefore kept OUT of the world: a <mask> is
+     a resource and is never drawn where it sits, and putting it inside would
+     apply the camera to it a second time. */
+
+  var MASKS = '__masks';
+
+  function maskPlane() {
+    var st = D.getElementById('stage');
+    if (!st) return null;
+    var svg = D.getElementById(MASKS);
+    if (!svg) {
+      svg = D.createElementNS(SVGNS, 'svg');
+      svg.id = MASKS;
+      svg.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;'
+                        + 'overflow:hidden;pointer-events:none';
+      st.appendChild(svg);
+    }
+    return svg;
+  }
+
+  function svgNode(tag) { return D.createElementNS(SVGNS, tag); }
+  function mat(m) {
+    return 'matrix(' + [m.a, m.b, m.c, m.d, m.e, m.f]
+      .map(function (v) { return (+v).toFixed(4); }).join(',') + ')';
+  }
+
+  /* An element's top-left in scene coordinates, by the same walk centreOf
+     does and for the same reason: a bounding box is in screen pixels and
+     already has the camera's transform baked into it. */
+  function topLeftOf(el) {
+    var x = 0, y = 0, n = el;
+    while (n && n.id !== WORLD) { x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; }
+    return { x: x, y: y };
+  }
+
+  /* The element's own transform as it is actually applied — about its centre,
+     which is what transform-origin defaults to — optionally inverted. Returns
+     null when there is nothing to apply, or when the matrix cannot be
+     inverted, which is what a scale of 0 gives. */
+  function ownMatrix(el, cx, cy, invert) {
+    var tx = el.style.transform;
+    if (!tx || !W.DOMMatrix) return null;
+    var m;
+    try {
+      m = new W.DOMMatrix('translate(' + cx + 'px,' + cy + 'px) ' + tx
+                        + ' translate(' + (-cx) + 'px,' + (-cy) + 'px)');
+    } catch (e) { return null; }          /* a transform we cannot read is not fatal */
+    if (invert) m = m.inverse();
+    return isFinite(m.a) && isFinite(m.f) ? m : null;
+  }
+
+  /* The shape, redrawn into the mask in scene coordinates and painted flat.
+     Its colour is thrown away; everything about its GEOMETRY is kept — the
+     dash offset a .draw() is part way through, its transform, its opacity —
+     which is the whole trick. Nothing here knows about time. */
+  function matteShape(src, paint) {
+    var keep = function (a) { var v = src.getAttribute(a); return v && v !== 'none'; };
+    var alpha = src.style.opacity === '' ? 1 : src.style.opacity;
+    var m, out;
+
+    if (src.tagName && String(src.tagName).toLowerCase() === 'path') {
+      out = svgNode('path');
+      out.setAttribute('d', src.getAttribute('d') || '');
+      out.setAttribute('fill', keep('fill') ? paint : 'none');
+      out.setAttribute('stroke', keep('stroke') ? paint : 'none');
+      out.setAttribute('stroke-width', src.getAttribute('stroke-width') || 0);
+      out.setAttribute('stroke-linecap', src.getAttribute('stroke-linecap') || 'round');
+      out.setAttribute('stroke-linejoin', 'round');
+      if (keep('stroke-dasharray'))
+        out.setAttribute('stroke-dasharray', src.getAttribute('stroke-dasharray'));
+      /* draw() writes the dash on the STYLE rather than the attribute, and it
+         is the only reason a path makes a good matte, so it is copied last and
+         wins. */
+      if (src.style.strokeDasharray)  out.style.strokeDasharray  = src.style.strokeDasharray;
+      if (src.style.strokeDashoffset) out.style.strokeDashoffset = src.style.strokeDashoffset;
+      var b = { x: 0, y: 0, width: 0, height: 0 };
+      try { b = src.getBBox(); } catch (e) { /* an empty path has no box */ }
+      m = ownMatrix(src, b.x + b.width / 2, b.y + b.height / 2, false);
+    } else {
+      /* Anything that is not a path mattes by its BOX. Exact for shape() and
+         image(); the bounding box for text, which is the honest limit of doing
+         this without re-rendering the glyphs into the mask. */
+      var tl = topLeftOf(src), w = src.offsetWidth, h = src.offsetHeight;
+      out = svgNode('rect');
+      out.setAttribute('x', tl.x); out.setAttribute('y', tl.y);
+      out.setAttribute('width', w); out.setAttribute('height', h);
+      var r = src.style.borderRadius;
+      if (r) {
+        var pc = /%/.test(r) ? parseFloat(r) / 100 : 0;
+        out.setAttribute('rx', pc ? w * pc : parseFloat(r) || 0);
+        out.setAttribute('ry', pc ? h * pc : parseFloat(r) || 0);
+      }
+      out.setAttribute('fill', paint);
+      m = ownMatrix(src, tl.x + w / 2, tl.y + h / 2, false);
+    }
+    out.setAttribute('opacity', alpha);
+    if (m) out.setAttribute('transform', mat(m));
+    return out;
+  }
+
+  /* Rebuilt from nothing at the end of every frame, after everything has been
+     laid out and moved — a matte measures the shape, and a shape that has not
+     been placed yet measures as nothing. */
+  function applyMasks() {
+    if (!everMasked) return;
+    var Wd = W_ || 1920, Ht = H_ || 1080;
+    var svg = null, hidden = {}, i, n, el, src;
+
+    for (i = 0; i < nodes.length; i++)
+      if (nodes[i].mask && nodes[i].mask.of && !nodes[i].mask.show)
+        hidden[nodes[i].mask.of.id] = 1;
+
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      el = D.getElementById(n.id);
+      if (!el) continue;
+      /* A shape used as a matte is not part of the picture, the same switch a
+         compositor flips when a layer becomes a track matte. visibility rather
+         than display, because a thing with no box cannot be measured and the
+         matte is measured from it. */
+      var vis = hidden[n.id] ? 'hidden' : '';
+      if (el.style.visibility !== vis) el.style.visibility = vis;
+
+      if (!n.mask) {
+        /* Cleared, not merely not-set. A mask left over from a frame that had
+           one is exactly the kind of memory the purity rule is about. */
+        if (el.style.maskImage || el.style.webkitMaskImage)
+          el.style.maskImage = el.style.webkitMaskImage = '';
+        continue;
+      }
+      src = n.mask.of && D.getElementById(n.mask.of.id);
+      if (!src) continue;
+      svg = svg || maskPlane();
+      if (!svg) return;
+
+      var id = n.id + '_matte';
+      var m = D.getElementById(id);
+      if (!m) {
+        m = svgNode('mask');
+        m.id = id;
+        /* A region in the element's own pixels rather than a share of its box,
+           so a matte that starts off the side of the thing is still there when
+           it arrives. */
+        m.setAttribute('maskUnits', 'userSpaceOnUse');
+        m.setAttribute('x', -Wd); m.setAttribute('y', -Ht);
+        m.setAttribute('width', Wd * 3); m.setAttribute('height', Ht * 3);
+        svg.appendChild(m);
+      }
+      m.textContent = '';
+
+      var soft = svgNode('g');
+      if (n.mask.feather) soft.style.filter = 'blur(' + n.mask.feather + 'px)';
+      /* A mask is read as LUMINANCE: white shows, black hides, and nothing at
+         all hides. So the inverse is the same stencil cut out of a white
+         field, which is one extra rectangle rather than a second mechanism. */
+      if (n.mask.invert) {
+        var back = svgNode('rect');
+        back.setAttribute('x', -Wd * 2); back.setAttribute('y', -Ht * 2);
+        back.setAttribute('width', Wd * 6); back.setAttribute('height', Ht * 6);
+        back.setAttribute('fill', '#fff');
+        soft.appendChild(back);
+      }
+      var into = svgNode('g');
+      var tl = topLeftOf(el);
+      var un = ownMatrix(el, el.offsetWidth / 2, el.offsetHeight / 2, true);
+      into.setAttribute('transform',
+        (un ? mat(un) + ' ' : '') + 'translate(' + (-tl.x) + ',' + (-tl.y) + ')');
+      into.appendChild(matteShape(src, n.mask.invert ? '#000' : '#fff'));
+      soft.appendChild(into);
+      m.appendChild(soft);
+
+      el.style.maskImage = 'url(#' + id + ')';
+      el.style.webkitMaskImage = 'url(#' + id + ')';
+    }
   }
 
   /** captions([[text, ms], ...])   @make
