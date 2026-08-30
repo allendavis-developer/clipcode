@@ -420,7 +420,7 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
     linear-gradient(to top right,transparent calc(50% - 1px),var(--tx) 50%,transparent calc(50% + 1px)),
     linear-gradient(90deg,color-mix(in srgb,var(--tx) 42%,transparent),
                           color-mix(in srgb,var(--tx) 14%,transparent))}
-.clip .tx .txn{position:absolute;left:3px;right:9px;top:50%;transform:translateY(-50%);
+.clip .tx .txn{position:absolute;left:3px;right:2px;top:50%;transform:translateY(-50%);
   font-family:var(--mono);font-size:9.5px;line-height:1;color:#fff;
   text-shadow:0 1px 2px #000c;white-space:nowrap;overflow:hidden}
 /* wider than a trim handle because it sits on top of one and is the smaller
@@ -445,3 +445,27 @@ button,input,select,textarea{font-family:inherit;font-size:inherit}
 .clip .cw{position:absolute;left:0;bottom:0;pointer-events:none;opacity:.9}
 .clip.audio{background:#243447;border-color:#3a5573}
 .clip.audio .cn{color:#9fc4ea}
+
+
+/* ---------------------------------------------------------------- guides --
+   Over the picture, never in it: nothing here is exported, and it all has to
+   stay legible against whatever is underneath without competing with it. */
+#guides{position:absolute;pointer-events:none;z-index:40}
+#guides.hidden{display:none}
+#guides svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.gThird{stroke:rgba(255,255,255,.16);stroke-width:.18;vector-effect:non-scaling-stroke}
+.gSafe{fill:none;stroke:rgba(255,255,255,.10);stroke-width:.18;vector-effect:non-scaling-stroke}
+.gSafe.title{stroke-dasharray:2 2}
+.gMid{stroke:rgba(255,255,255,.42);stroke-width:.3;vector-effect:non-scaling-stroke}
+
+/* the eye: where it is now, and either side of a cut */
+.gDot{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%}
+.gDot.gNow{background:rgba(232,145,45,.9);box-shadow:0 0 0 3px rgba(232,145,45,.25)}
+.gDot.gWas{background:transparent;border:2px solid rgba(255,255,255,.75)}
+.gDot.gNext{background:rgba(92,184,92,.95);box-shadow:0 0 0 3px rgba(92,184,92,.22)}
+.gTrace line{stroke:rgba(255,255,255,.6);stroke-width:1.4;stroke-dasharray:4 3;
+             vector-effect:non-scaling-stroke}
+.gRead{position:absolute;left:8px;bottom:8px;padding:3px 8px;border-radius:3px;
+       background:rgba(0,0,0,.66);color:#e8e8e8;font-family:var(--mono);font-size:11px;
+       white-space:nowrap}
+#btnGuides.on{color:var(--accent);border-color:var(--accent)}

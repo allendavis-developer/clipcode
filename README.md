@@ -58,6 +58,7 @@ server.mjs              http routing, and nothing else
     scene.js            the chained, choreography-first layer clips are written in
     help.js             the F1 reference, parsed out of scene.js and motion.js
     layout.js           pane sizes, remembered per browser
+    guides.js           composition guides, and the eye-trace readout
     curve.js            the easing editor
     pathedit.js         the shape editor
     drag.js             the one drag primitive
@@ -402,6 +403,35 @@ in/out and delayed to where it sits on the timeline.
 its sound would be exporting something you never heard, and the contract of the
 renderer is that the file is what you watched. Unmuting video in the preview,
 and then in the export, is the obvious next step.
+
+---
+
+## Guides, and where the eye is
+
+**Guides** in the top bar puts thirds, action and title safe, and a centre
+cross over the picture. None of it is exported.
+
+It also marks **where the viewer is most likely looking** — and at a cut, shows
+where the eye was on the last frame of the outgoing clip against where it has
+to go on the first frame of the incoming one, with the distance between them:
+
+```
+eye trace · 1% of the frame · matched
+eye trace · 92% of the frame · a long jump
+```
+
+That is Walter Murch's *eye trace*, from *In the Blink of an Eye*: the
+audience's focus of interest has a position in the frame, and a cut that moves
+it a long way makes the viewer hunt for the subject and feel the edit. Match
+the positions and the cut disappears. It is one of his six criteria for a good
+cut, and unlike the other five it is something a tool can measure for you.
+
+The focus is estimated from the **elements**, not from pixels — each weighted
+by area × opacity, lifted slightly by brightness. For a frame that is a few big
+words on black, the centroid of the big words *is* where you are looking, and
+it is exact rather than guessed. It is still an estimate and it says so; the
+value is not the dot, it is the distance between two dots either side of a cut,
+which is a number you can act on and could not otherwise get.
 
 ---
 

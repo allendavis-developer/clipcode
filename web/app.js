@@ -19,6 +19,7 @@ import * as Transport from './transport.js';
 import * as Editor from './editor.js';
 import * as Pool from './pool.js';
 import * as Help from './help.js';
+import * as Guides from './guides.js';
 import * as Curve from './curve.js';
 import { draggable, cursorDuring } from './drag.js';
 import * as Layout from './layout.js';
@@ -104,8 +105,10 @@ async function deleteClip() {
 
 /* The clock advances time; the timeline draws where time is. Transport does
    not know what a playhead looks like, so the redraw is wired here. */
+Guides.init();
+
 Transport.init({
-  onFrame: TL.drawPlayhead,
+  onFrame: () => { TL.drawPlayhead(); Guides.draw(); },
   /* every clip boundary, which is what "next edit" means */
   edits: () => S.tracks.flatMap(tr => (tr.clips || [])
     .flatMap(c => [c.start, c.start + (c.out - c.in)]))
