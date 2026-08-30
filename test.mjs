@@ -14,6 +14,7 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 
 const B = process.env.STUDIO || 'http://localhost:4321';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -613,6 +614,61 @@ ok('double-click resets one and forgets it',
    reset.pool === '210px' && reset.tl === dragged.tl && !/--pool/.test(left || ''),
    `pool back to ${reset.pool}, timeline still ${reset.tl}`);
 await page.evaluate(() => localStorage.removeItem('studio.layout'));
+
+/* ---- it comes out as a video ----
+
+   The end of the whole thing. A render drives the same stage.js the viewer
+   does, so this checks the one claim that matters: that the file on disk has
+   the picture in it. A black frame is the failure mode -- the pipeline can run
+   perfectly and export nothing, which is exactly what it did the first time. */
+/* Its own project. By this point the suite's has a dozen clips stacked at
+   various times from earlier checks, so "render it and look at a frame" would
+   be sampling whichever one happened to be under that moment. */
+const RP = '_testrender';
+const rdir = path.join(HERE, 'projects', RP);
+fs.rmSync(rdir, { recursive: true, force: true });
+await api('/api/project/new', 'POST', { name: RP });
+await page.selectOption('#project', RP);
+await page.waitForTimeout(900);
+await page.click('#btnNewCode');
+await page.waitForTimeout(1500);
+await type(`duration(400);
+text('EXPORT').size(300).color('#ffffff').center(400);
+camera.zoom(1.2, 400);`);
+await page.waitForTimeout(700);
+
+let rendered = null, renderErr = null;
+const mp4 = path.join(HERE, 'renders', RP + '.mp4');
+try {
+  fs.rmSync(mp4, { force: true });
+  execFileSync(process.execPath,
+    [path.join(HERE, 'render.mjs'), RP, mp4, '--scale', '0.35', '--fps', '10'],
+    { stdio: 'pipe', timeout: 120000 });
+  rendered = fs.existsSync(mp4) ? fs.statSync(mp4).size : 0;
+} catch (e) {
+  renderErr = String(e.stdout || e.message).split('\n').slice(-4).join(' ').slice(0, 160);
+}
+ok('a project renders to an mp4', rendered > 2000, renderErr || `${rendered} bytes`);
+
+/* and the picture is IN it: pull a frame back out and count the lit pixels */
+let litFrame = -1;
+if (rendered) {
+  const png = path.join(HERE, 'renders', RP + '-check.png');
+  try {
+    /* -ss rather than a select filter: the filter needs a comma escaped, and
+       an escaped comma in an args array is a fight with no upside. */
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-ss', '0.2', '-i', mp4,
+                            '-frames:v', '1', png],
+                 { stdio: 'pipe', timeout: 60000 });
+    const buf = fs.readFileSync(png);
+    litFrame = 0;
+    for (let i = 0; i < buf.length; i++) if (buf[i] > 200) litFrame++;
+    fs.rmSync(png, { force: true });
+  } catch (e) { litFrame = -1; }
+}
+ok('and the frames are not black', litFrame > 400, `${litFrame} bright bytes in frame 2`);
+fs.rmSync(mp4, { force: true });
+fs.rmSync(rdir, { recursive: true, force: true });
 
 ok('no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 

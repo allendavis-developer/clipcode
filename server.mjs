@@ -236,6 +236,8 @@ const server = http.createServer(async (req, res) => {
 
   /* ---- the app itself ---- */
   if (p === '/' || p === '/index.html') return serveFile(res, path.join(WEB, 'index.html'));
+  /* The bare page a render screenshots. Same compositor, no chrome. */
+  if (p === '/render') return serveFile(res, path.join(WEB, 'render.html'));
   if (p.startsWith('/web/')) {
     const f = safeJoin(WEB, p.slice(5));
     return f ? serveFile(res, f) : sendJSON(res, 400, { why: 'bad path' });

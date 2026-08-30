@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>render</title>
+
+<!-- The render page. No chrome, no editor, no scaling: the stage at its own
+     size and nothing else on the screen, so a screenshot of this window IS a
+     frame of the video.
+
+     It loads the same state.js and stage.js the editor does, and composites
+     the same way. That is the point — what comes out of a render is what you
+     watched in the viewer, because it is the same code drawing it. A separate
+     render path is a second implementation of the picture, and the two drift.
+
+     Driven from outside by render.mjs through three globals:
+       __renderReady()   the project is loaded and every clip has said ready
+       __renderInfo()    { duration, fps, w, h }
+       __renderSeek(ms)  draw exactly that moment, resolving when it is on screen
+-->
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  /* stage.js sizes #stageFit and scales #stageBox to fit #viewer, so making
+     the viewer exactly the stage size gives a scale of 1 and a 1:1 picture. */
+  #viewer { position: fixed; inset: 0; background: #000; }
+  #stageFit { position: absolute; left: 0; top: 0; }
+  #stageBox { transform-origin: 0 0; }
+  /* The editor's stylesheet is not loaded here, and #stage gets its box from
+     it, so it is given one directly. Without this the stage is zero pixels
+     tall and every exported frame is black. */
+  #stage { position: absolute; inset: 0; width: 100%; height: 100%;
+           overflow: hidden; background: #000; }
+  #stage .layer { position: absolute; inset: 0; width: 100%; height: 100%;
+                  border: 0; display: block; }
+  #stageErr { display: none; }
+</style>
+
+<div id="viewer">
+  <div id="stageFit">
+    <div id="stageBox"><div id="stage"></div></div>
+  </div>
+</div>
+
+<script type="module" src="/web/render.js"></script>

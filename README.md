@@ -249,6 +249,32 @@ playhead, selection, timeline zoom.
 
 ---
 
+## Getting a video out
+
+```
+npm start                              in one terminal
+node studio/render.mjs <project>       in another
+node studio/render.mjs myvideo out.mp4 --fps 60 --scale 0.5 --from 0 --to 5000
+```
+
+It drives the real app in a real browser at the stage's own size and
+screenshots one frame at a time into ffmpeg. Slower than a clever approach, and
+the only honest one: the picture is composited by the same `stage.js` the
+viewer uses, so what comes out is what you watched. A separate render path
+would be a second implementation of the picture, and two implementations drift.
+
+**It seeks rather than plays.** Every clip's `__render` is a pure function of
+`t`, so frame 900 can be asked for directly and is exactly the frame the
+playhead calls 900 — no warm-up, no replaying from the start. That is what the
+purity rule buys, and a clip that breaks it shows up here as a render that
+disagrees with the preview.
+
+`--scale 0.5` renders the same composition at half the pixels for a quick
+draft. Playwright is a devDependency and ffmpeg is expected on PATH; neither is
+needed to *run* the editor, which still has no runtime dependencies at all.
+
+---
+
 ## The edit-see loop
 
 Every other cost in this editor is paid once. Waiting to see your change is
@@ -269,7 +295,6 @@ paid on every edit, so it gets its own design:
 
 ## Known gaps
 
-- **No export.** You can build a video and not get an mp4 out. Biggest one.
 - **No audio track.** Media imports and plays, but there is no waveform.
 - **Cuts only** — no transitions.
 - Placing an element means typing coordinates; dragging it in the viewer and

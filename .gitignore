@@ -3,3 +3,6 @@
 projects/
 presets.json
 node_modules/
+
+# rendered video is output, not source
+renders/
