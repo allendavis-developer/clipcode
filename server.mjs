@@ -53,8 +53,13 @@ function fontFaces(projectName) {
     if (!info) continue;
     const italic = /italic|oblique/i.test(info.style);
     const url = `/p/${encodeURIComponent(projectName)}/fonts/${encodeURIComponent(f)}`;
+    /* The weight matters as much as the name. A family carried as four files
+       declares the same family four times, and without a weight on each the
+       last one read wins and every weight in the clip draws as that one. */
     out += `@font-face{font-family:'${info.family}';src:url('${url}');`
-         + `font-style:${italic ? 'italic' : 'normal'};font-display:block}
+         + `font-style:${italic ? 'italic' : 'normal'};`
+         + (info.weight ? `font-weight:${info.weight};` : '')
+         + `font-display:block}
 `;
   }
   return out;
