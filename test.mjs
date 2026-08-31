@@ -392,6 +392,23 @@ const sceneLit = await renderAt(400);
 ok('and the group is on the picture', sceneLit > sceneDark * 2,
    `${sceneDark} lit at 0ms -> ${sceneLit} at 400ms`);
 
+/* ---- a file that will not load says so ----
+
+   window.onerror does not fire for a resource that 404s: an <img> with a bad
+   src draws nothing, and you get a black frame with a correct-looking DOM and
+   no error anywhere. That is the failure this whole error path exists to end,
+   and it hid a wrong media path for a long time. */
+expected = true;
+await type(`duration(1000);
+image('media/nope.jpg').at(200, 200).style({ width: 400 });`);
+await page.waitForTimeout(900);
+ok('a missing image reports itself',
+   /could not load/.test(await page.textContent('#codeErr')),
+   await page.textContent('#codeErr'));
+ok('and says paths are relative to the project',
+   /relative to the project/.test(await page.textContent('#codeErr')));
+expected = false;
+
 /* ---- the primitives the style is actually built from ---- */
 const textNow = async ms => {
   await page.evaluate(t => {

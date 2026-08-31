@@ -126,6 +126,27 @@ ${shared || ''}
    script is being PARSED, so a handler placed after it is never reached — which
    is how a missing comma used to surface as "the clip did not finish loading"
    with no line and no hint. From here it arrives with both. */
+/* A file that will not load is a mistake the clip made, and it has to say so.
+
+   window.onerror does not fire for a resource that 404s — an <img> with a bad
+   src simply draws nothing, which is a black frame with a correct-looking DOM
+   and no error anywhere. That is the same silent-nothing this whole error path
+   exists to end, and it cost real time before it was caught: the documented
+   media path was wrong for months and every symptom pointed somewhere else.
+
+   Resource errors do not bubble, so this listens in the capture phase. */
+window.addEventListener('error', function (e) {
+  var el = e.target;
+  if (!el || el === window || !el.tagName) return;      /* a real throw; onerror has it */
+  var tag = el.tagName.toLowerCase();
+  if (tag !== 'img' && tag !== 'video' && tag !== 'audio' && tag !== 'source') return;
+  var src = el.getAttribute('src') || '';
+  parent.postMessage({ studio: 'error',
+    message: tag + " could not load '" + src + "'"
+           + (src.charAt(0) === '/' ? '' : ' — paths are relative to the project folder'),
+    line: 0, col: 0, src: location.pathname }, '*');
+}, true);
+
 window.onerror = function (msg, file, line, col) {
   /* Only the clip's own script sits under the wrapper, so only its line
      numbers need the wrapper taken back off. A throw from a lib/ file arrives
