@@ -51,6 +51,7 @@ export function init(handlers = {}) {
     applyZoom();
   }
   initPresets();
+  initLib();
   initPickers();
   initZoom();
   addEventListener('visibilitychange', () => { if (document.hidden) apply(); });
@@ -200,6 +201,54 @@ export function showError(msg, where) {
     marks.push(cm.markText({ line: i, ch: from }, { line: i, ch: to },
                            { className: 'errTok', title: said }));
 }
+/* ------------------------------------------------------------------ lib --
+   A project's shared code is edited here, like everything else.
+
+   The endpoints for it existed before this did, which meant the one place you
+   were told to write a reusable move was also the one place you had to leave
+   the editor to reach. A tool that sends you to a text editor to use its own
+   best feature has not shipped that feature.
+
+   A lib file is not on the timeline and has no duration — it is a library, not
+   a shot — so it is opened as a clip-shaped thing whose id belongs to no clip.
+   Everything downstream of that already copes: applyDuration finds no clip and
+   does nothing, and reloadClip finds no layer and does nothing. */
+async function initLib() {
+  const sel = $('#pickLib');
+  if (!sel) return;
+  await refreshLib();
+  sel.addEventListener('change', async () => {
+    const v = sel.value;
+    sel.selectedIndex = 0;
+    if (!v) return;
+    if (v === '__new') {
+      const name = prompt('Name for the shared file', 'shared');
+      if (!name) return;
+      const r = await api('/api/lib/new', 'POST', { name: S.name, file: name });
+      if (!r || !r.ok) return showError(r && r.why ? r.why : 'could not make it');
+      await refreshLib();
+      return open({ id: 'lib:' + r.src, kind: 'code', src: r.src });
+    }
+    open({ id: 'lib:' + v, kind: 'code', src: v });
+  });
+}
+
+export async function refreshLib() {
+  const sel = $('#pickLib');
+  if (!sel || !S.name) return;
+  let files = [];
+  try {
+    const r = await api('/api/lib?name=' + enc(S.name));
+    files = (r && r.files) || [];
+  } catch {}
+  sel.innerHTML = '<option value="">shared…</option>'
+    + (files.length
+        ? `<optgroup label="loaded into every clip">${files.map(f =>
+            `<option value="${esc(f.src)}">${esc(f.name)}</option>`).join('')}</optgroup>`
+        : '')
+    + '<option value="__new">new shared file…</option>';
+}
+
 export const openClip = () => clip;
 
 /* A note is not an error. The clip runs; this is the tool saying that what you
@@ -262,7 +311,10 @@ export async function open(next) {
   clip = next;
   showError('');
   const editable = !!next && next.kind === 'code';
-  $('#codeName').textContent = editable ? next.src.replace(/^clips\//, '')
+  const shared = !!next && /^lib\//.test(next.src || '');
+  $('#codeName').textContent = editable
+    ? (shared ? next.src + '  ·  every clip can call this'
+              : next.src.replace(/^clips\//, ''))
     : next ? `${next.kind} clip — nothing to write`
     : 'no clip selected — click one on the timeline';
   $('#presets').disabled = !editable;

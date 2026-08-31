@@ -76,6 +76,8 @@ async function loadProject(name, keepTime = false) {
   await Editor.open(clipToOpen());
   /* the font picker lists what THIS project carries, so it follows the project */
   Editor.refreshFonts();
+  /* and so does its shared code */
+  Editor.refreshLib();
   /* and so do the guides — a guide marks a position in one video */
   Guides.reload();
   TL.draw();
